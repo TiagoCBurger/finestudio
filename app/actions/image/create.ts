@@ -4,7 +4,7 @@ import { getSubscribedUser } from '@/lib/auth';
 import { withCreditCheck } from '@/lib/credits/middleware';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
-import { imageModels } from '@/lib/models/image';
+import { imageModelsServer } from '@/lib/models/image/index.server';
 import { visionModels } from '@/lib/models/vision';
 import { createClient } from '@/lib/supabase/server';
 import { projects } from '@/schema';
@@ -100,13 +100,14 @@ const _generateImageAction = async ({
   try {
     const client = await createClient();
     const user = await getSubscribedUser();
-    const model = imageModels[modelId];
+    const model = imageModelsServer[modelId];
 
     if (!model) {
       throw new Error('Model not found');
     }
 
     let image: Experimental_GenerateImageResult['image'] | undefined;
+    let responseHeaders: any = {};
 
     const provider = model.providers[0];
 
@@ -120,6 +121,16 @@ const _generateImageAction = async ({
       // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
+      responseHeaders = generatedImageResponse.response?.headers || {};
+
+      // Tentar obter do providerMetadata
+      const falMetadata = (generatedImageResponse as any).providerMetadata?.fal;
+      if (falMetadata) {
+        responseHeaders = {
+          'x-fal-request-id': falMetadata.requestId,
+          'x-fal-status': falMetadata.status,
+        };
+      }
     } else {
       let aspectRatio: `${number}:${number}` | undefined;
       if (size) {
@@ -141,11 +152,58 @@ const _generateImageAction = async ({
         ].join('\n'),
         size: size as never,
         aspectRatio,
+        providerOptions: {
+          fal: {
+            nodeId, // Para atualização do project via webhook
+            projectId, // Para atualização do project via webhook
+          },
+        },
       });
 
       // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
+      responseHeaders = generatedImageResponse.response?.headers || {};
+
+      // Tentar obter do providerMetadata
+      const falMetadata = (generatedImageResponse as any).providerMetadata?.fal;
+      if (falMetadata) {
+        responseHeaders = {
+          'x-fal-request-id': falMetadata.requestId,
+          'x-fal-status': falMetadata.status,
+        };
+      }
+    }
+
+    // Se está em modo pending (webhook), retornar imediatamente sem processar
+    const isPending = responseHeaders['x-fal-status'] === 'pending';
+
+    console.log('Checking pending status:', {
+      isPending,
+      hasHeaders: !!responseHeaders,
+      falStatus: responseHeaders['x-fal-status'],
+      falRequestId: responseHeaders['x-fal-request-id'],
+      hasImage: !!image,
+    });
+
+    if (isPending) {
+      console.log('✅ Image generation pending, returning placeholder for webhook polling');
+
+      return {
+        nodeData: {
+          generated: {
+            url: '', // URL vazia, será preenchida pelo webhook
+            type: 'image/png',
+            headers: responseHeaders,
+          },
+          updatedAt: new Date().toISOString(),
+          description,
+        },
+      };
+    }
+
+    if (!image) {
+      throw new Error('No image generated');
     }
 
     let extension = image.mediaType.split('/').pop();
@@ -236,6 +294,8 @@ const _generateImageAction = async ({
       generated: {
         url: downloadUrl.publicUrl,
         type: image.mediaType,
+        // Incluir headers da resposta (para webhook polling)
+        headers: responseHeaders,
       },
       description,
     };

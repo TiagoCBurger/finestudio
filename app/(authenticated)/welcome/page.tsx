@@ -25,11 +25,11 @@ const Welcome = async () => {
   }
 
   let welcomeProject = await database.query.projects.findFirst({
-    where: and(eq(projects.userId, user.id), eq(projects.welcomeProject, true)),
+    where: and(eq(projects.userId, user.id), eq(projects.name, 'Welcome')),
   });
 
   if (!welcomeProject) {
-    const response = await createProjectAction('Welcome', true);
+    const response = await createProjectAction('Welcome');
 
     if ('error' in response) {
       return <div>Error: {response.error}</div>;

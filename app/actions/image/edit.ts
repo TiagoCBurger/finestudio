@@ -3,7 +3,7 @@
 import { getSubscribedUser } from '@/lib/auth';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
-import { imageModels } from '@/lib/models/image';
+import { imageModelsServer } from '@/lib/models/image/index.server';
 // Stripe removido - sem rastreamento de créditos
 import { createClient } from '@/lib/supabase/server';
 import { projects } from '@/schema';
@@ -101,7 +101,7 @@ export const editImageAction = async ({
     const client = await createClient();
     const user = await getSubscribedUser();
 
-    const model = imageModels[modelId];
+    const model = imageModelsServer[modelId];
 
     if (!model) {
       throw new Error('Model not found');
@@ -114,6 +114,7 @@ export const editImageAction = async ({
     const provider = model.providers[0];
 
     let image: Experimental_GenerateImageResult['image'] | undefined;
+    let responseHeaders: any = {};
 
     const defaultPrompt =
       images.length > 1
@@ -133,6 +134,7 @@ export const editImageAction = async ({
       // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
+      responseHeaders = generatedImageResponse.response?.headers || {};
     } else {
       const base64Image = await fetch(images[0].url)
         .then((res) => res.arrayBuffer())
@@ -164,6 +166,8 @@ Please analyze all the visual elements from the connected images and create a ha
             fal: {
               image: images[0].url, // Primeira imagem
               images: images.map((img) => img.url), // Todas as imagens (para Nano Banana)
+              nodeId, // Para atualização do project via webhook
+              projectId, // Para atualização do project via webhook
             },
           }
           : {
@@ -175,7 +179,41 @@ Please analyze all the visual elements from the connected images and create a ha
 
       // Rastreamento de créditos removido
 
+      // Verificar se está em modo webhook (flag especial)
+      const isWebhookMode = (generatedImageResponse as any)._webhookMode;
+      const webhookRequestId = (generatedImageResponse as any)._requestId;
+
+      console.log('📦 Generated image response:', {
+        hasImage: !!generatedImageResponse.image,
+        isWebhookMode,
+        webhookRequestId,
+      });
+
+      if (isWebhookMode && webhookRequestId) {
+        console.log('✅ Webhook mode detected, returning pending result');
+
+        return {
+          nodeData: {
+            generated: {
+              url: '', // URL vazia, será preenchida pelo webhook
+              type: 'image/png',
+              headers: {
+                'x-fal-request-id': webhookRequestId,
+                'x-fal-status': 'pending',
+              },
+            },
+            updatedAt: new Date().toISOString(),
+            description: instructions ?? defaultPrompt,
+          },
+        };
+      }
+
       image = generatedImageResponse.image;
+      responseHeaders = generatedImageResponse.response?.headers || {};
+    }
+
+    if (!image) {
+      throw new Error('No image generated');
     }
 
     const bytes = Buffer.from(image.base64, 'base64');
@@ -221,6 +259,8 @@ Please analyze all the visual elements from the connected images and create a ha
       generated: {
         url: downloadUrl.publicUrl,
         type: contentType,
+        // Incluir headers da resposta (para webhook polling)
+        headers: responseHeaders,
       },
       description: instructions ?? defaultPrompt,
     };

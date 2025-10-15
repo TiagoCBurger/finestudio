@@ -229,5 +229,6 @@ export type TersaModel = {
   legacy?: boolean;
   priceIndicator?: PriceBracket;
   disabled?: boolean;
+  enabled?: boolean;
   default?: boolean;
 };

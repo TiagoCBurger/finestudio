@@ -3,7 +3,7 @@
 import { getSubscribedUser } from '@/lib/auth';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
-import { getAllVideoModels } from '@/lib/models/video';
+import { getAllVideoModelsServer } from '@/lib/models/video/index.server';
 // Stripe removido - sem rastreamento de créditos
 import { createClient } from '@/lib/supabase/server';
 import { projects } from '@/schema';
@@ -43,7 +43,7 @@ export const generateVideoAction = async ({
   try {
     const client = await createClient();
     const user = await getSubscribedUser();
-    const allModels = getAllVideoModels();
+    const allModels = getAllVideoModelsServer();
     const model = allModels[modelId];
 
     if (!model) {

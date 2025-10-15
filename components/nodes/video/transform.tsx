@@ -101,7 +101,7 @@ export const VideoTransform = ({
 
       updateNodeData(id, {
         model: value,
-        ...(needsDurationReset && { duration: newModel.durations[0] })
+        ...(needsDurationReset && newModel.durations && { duration: newModel.durations[0] })
       });
     },
     [id, updateNodeData, data.duration]

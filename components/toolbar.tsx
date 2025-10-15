@@ -45,7 +45,7 @@ export const ToolbarInner = () => {
               variant="ghost"
               size="icon"
               className="rounded-full"
-              onClick={() => handleAddNode(button.id, button.data)}
+              onClick={() => handleAddNode(button.id)}
             >
               <button.icon size={12} />
             </Button>

@@ -45,3 +45,18 @@ export const creditTransactions = pgTable('credit_transactions', {
   metadata: json('metadata'), // Dados extras (prompt, resultado, etc)
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// Tabela para gerenciar jobs assíncronos do fal.ai
+export const falJobs = pgTable('fal_jobs', {
+  id: text('id').primaryKey().default(uuid).notNull(),
+  requestId: varchar('request_id').notNull().unique(), // ID do fal.ai
+  userId: text('user_id').notNull().references(() => profile.id),
+  modelId: varchar('model_id').notNull(),
+  type: varchar('type').notNull(), // 'image' ou 'video'
+  status: varchar('status').notNull().default('pending'), // 'pending', 'completed', 'failed'
+  input: json('input'), // Parâmetros da requisição
+  result: json('result'), // Resultado quando completado
+  error: text('error'), // Mensagem de erro se falhar
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});

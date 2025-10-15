@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useAnalytics } from '@/hooks/use-analytics';
+import { useFalJob } from '@/hooks/use-fal-job';
 import { download } from '@/lib/download';
 import { handleError } from '@/lib/error/handle';
 import { imageModels, getEnabledImageModels } from '@/lib/models/image';
@@ -60,7 +61,75 @@ export const ImageTransform = ({
   const [localInstructions, setLocalInstructions] = useState(
     data.instructions ?? ''
   );
+  const [requestId, setRequestId] = useState<string | null>(null);
+
+  // Hook para monitorar job do fal.ai
+  const { job, loading: jobLoading, error: jobError } = useFalJob(requestId);
   const project = useProject();
+
+  // Debug: log quando requestId muda
+  useEffect(() => {
+    console.log('🔑 RequestId changed:', requestId);
+    if (requestId) {
+      console.log('✅ Starting to monitor job:', requestId);
+    }
+  }, [requestId]);
+
+  // Atualizar nó quando job completar
+  useEffect(() => {
+    if (!job) {
+      console.log('No job data yet');
+      return;
+    }
+
+    console.log('🔄 Job status changed:', {
+      status: job?.status,
+      hasResult: !!job?.result,
+      requestId: job?.requestId,
+      resultKeys: job?.result ? Object.keys(job.result) : [],
+    });
+
+    if (job?.status === 'completed' && job.result) {
+      console.log('✅ Fal.ai job completed! Full result:', JSON.stringify(job.result, null, 2));
+
+      // Extrair URL da imagem do resultado
+      const imageUrl = job.result.images?.[0]?.url;
+      console.log('🖼️ Extracted image URL:', imageUrl);
+
+      if (imageUrl) {
+        console.log('🔄 Updating node data with image URL...');
+
+        // Atualizar com o mesmo formato que o modo síncrono
+        const newData = {
+          ...data,
+          generated: {
+            url: imageUrl,
+            type: 'image/png',
+          },
+          updatedAt: new Date().toISOString(),
+        };
+
+        console.log('📦 New node data:', newData);
+        console.log('🚀 Calling updateNodeData...');
+        updateNodeData(id, newData);
+        console.log('✅ updateNodeData called successfully!');
+
+        toast.success('Image generated successfully via webhook!');
+        setRequestId(null); // Limpar request_id
+        setLoading(false); // Parar loading
+      } else {
+        console.error('❌ No image URL found in result:', job.result);
+        console.error('Result structure:', JSON.stringify(job.result, null, 2));
+      }
+    } else if (job?.status === 'failed') {
+      console.error('❌ Fal.ai job failed:', job.error);
+      toast.error(`Image generation failed: ${job.error}`);
+      setRequestId(null); // Limpar request_id
+      setLoading(false); // Parar loading
+    } else {
+      console.log('⏳ Job still pending or no result yet');
+    }
+  }, [job, id, updateNodeData, data]);
   const hasIncomingImageNodes =
     getImagesFromImageNodes(getIncomers({ id }, getNodes(), getEdges()))
       .length > 0;
@@ -70,7 +139,7 @@ export const ImageTransform = ({
   const size = data.size ?? selectedModel?.sizes?.at(0);
 
   const handleGenerate = useCallback(async () => {
-    if (loading || !project?.id) {
+    if (loading || jobLoading || !project?.id) {
       return;
     }
 
@@ -118,20 +187,71 @@ export const ImageTransform = ({
           size,
         });
 
+      console.log('Server Action response:', response);
+
       if ('error' in response) {
         throw new Error(response.error);
       }
 
-      updateNodeData(id, response.nodeData);
+      // Verificar se há request_id nos headers (modo webhook)
+      const nodeData = response.nodeData as any;
+      const falRequestId = nodeData.generated?.headers?.['x-fal-request-id'];
+      const falStatus = nodeData.generated?.headers?.['x-fal-status'];
 
-      toast.success('Image generated successfully');
+      console.log('Fal.ai headers:', {
+        falRequestId,
+        falStatus,
+        allHeaders: nodeData.generated?.headers,
+      });
+
+      if (falRequestId && falStatus === 'pending') {
+        console.log('✅ Fal.ai job submitted, monitoring:', falRequestId);
+        console.log('🔄 Setting requestId state...');
+        setRequestId(falRequestId);
+        console.log('✅ RequestId state set!');
+        // NÃO atualizar o nó ainda, aguardar webhook
+        // NÃO parar loading, manter até webhook completar
+        toast.info('Image generation started, waiting for completion...');
+        console.log('⏳ Keeping loading state active, waiting for webhook...');
+
+        // Iniciar polling do projeto para detectar quando o webhook atualizar
+        const pollInterval = setInterval(async () => {
+          console.log('🔄 Polling project for updates...');
+          await mutate(`/api/projects/${project.id}`);
+        }, 2000); // Poll a cada 2 segundos
+
+        // Limpar interval quando o job completar (após 30 segundos no máximo)
+        let pollCount = 0;
+        const maxPolls = 15; // 30 segundos
+        const checkCompletion = setInterval(() => {
+          pollCount++;
+          if (!loading && !jobLoading) {
+            console.log('✅ Job completed, stopping polling');
+            clearInterval(pollInterval);
+            clearInterval(checkCompletion);
+          } else if (pollCount >= maxPolls) {
+            console.log('⏱️ Polling timeout, stopping');
+            clearInterval(pollInterval);
+            clearInterval(checkCompletion);
+            setLoading(false);
+            toast.error('Image generation timeout. Please refresh the page.');
+          }
+        }, 500);
+      } else {
+        // Modo síncrono (sem webhook) - atualizar imediatamente
+        console.log('Updating node data directly (no webhook)');
+        updateNodeData(id, response.nodeData);
+        toast.success('Image generated successfully');
+        setLoading(false); // Parar loading apenas no modo síncrono
+      }
 
       setTimeout(() => mutate('credits'), 5000);
     } catch (error) {
       handleError('Error generating image', error);
-    } finally {
-      setLoading(false);
+      setLoading(false); // Parar loading apenas em caso de erro
+      setRequestId(null); // Limpar requestId em caso de erro
     }
+    // NÃO usar finally para não parar loading no modo webhook
   }, [
     loading,
     project?.id,
@@ -182,8 +302,9 @@ export const ImageTransform = ({
   );
 
   const toolbar = useMemo<ComponentProps<typeof NodeLayout>['toolbar']>(() => {
+    const enabledModels = getEnabledImageModels() || {};
     const availableModels = Object.fromEntries(
-      Object.entries(getEnabledImageModels()).map(([key, model]) => [
+      Object.entries(enabledModels).map(([key, model]) => [
         key,
         {
           ...model,
@@ -222,10 +343,12 @@ export const ImageTransform = ({
       });
     }
 
+    const isGenerating = loading || jobLoading;
+
     items.push(
-      loading
+      isGenerating
         ? {
-          tooltip: 'Generating...',
+          tooltip: jobLoading ? 'Processing via webhook...' : 'Generating...',
           children: (
             <Button size="icon" className="rounded-full" disabled>
               <Loader2Icon className="animate-spin" size={12} />
@@ -239,7 +362,7 @@ export const ImageTransform = ({
               size="icon"
               className="rounded-full"
               onClick={handleGenerate}
-              disabled={loading || !project?.id}
+              disabled={isGenerating || !project?.id}
             >
               {data.generated?.url ? (
                 <RotateCcwIcon size={12} />
@@ -291,6 +414,7 @@ export const ImageTransform = ({
     selectedModel?.sizes,
     size,
     loading,
+    jobLoading,
     data.generated,
     data.updatedAt,
     handleGenerate,
@@ -298,28 +422,38 @@ export const ImageTransform = ({
   ]);
 
   const aspectRatio = useMemo(() => {
-    if (!data.size) {
+    if (!data.size || typeof data.size !== 'string') {
       return '1/1';
     }
 
-    const [width, height] = data.size.split('x').map(Number);
+    const parts = data.size.split('x');
+    if (parts.length !== 2) {
+      return '1/1';
+    }
+
+    const [width, height] = parts.map(Number);
     return `${width}/${height}`;
   }, [data.size]);
 
   return (
     <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>
-      {loading && (
+      {(loading || jobLoading) && (
         <Skeleton
           className="flex w-full animate-pulse items-center justify-center rounded-b-xl"
           style={{ aspectRatio }}
         >
-          <Loader2Icon
-            size={16}
-            className="size-4 animate-spin text-muted-foreground"
-          />
+          <div className="flex flex-col items-center gap-2">
+            <Loader2Icon
+              size={16}
+              className="size-4 animate-spin text-muted-foreground"
+            />
+            <p className="text-xs text-muted-foreground">
+              {jobLoading ? 'Processing...' : 'Generating...'}
+            </p>
+          </div>
         </Skeleton>
       )}
-      {!loading && !data.generated?.url && (
+      {!loading && !jobLoading && !data.generated?.url && (
         <div
           className="flex w-full items-center justify-center rounded-b-xl bg-secondary p-4"
           style={{ aspectRatio }}
@@ -330,7 +464,7 @@ export const ImageTransform = ({
           </p>
         </div>
       )}
-      {!loading && data.generated?.url && (
+      {!loading && !jobLoading && data.generated?.url && (
         <Image
           src={data.generated.url}
           alt="Generated image"

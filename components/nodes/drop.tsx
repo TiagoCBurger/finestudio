@@ -112,7 +112,7 @@ export const DropNode = ({ data, id }: DropNodeProps) => {
                 .map((button) => (
                   <CommandItem
                     key={button.id}
-                    onSelect={() => handleSelect(button.id, button.data)}
+                    onSelect={() => handleSelect(button.id)}
                   >
                     <button.icon size={16} />
                     {button.label}

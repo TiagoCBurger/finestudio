@@ -1,7 +1,6 @@
-import { SiX } from '@icons-pack/react-simple-icons';
-import { AudioWaveformIcon, FileIcon, VideoIcon } from 'lucide-react';
+import { AudioWaveformIcon, VideoIcon } from 'lucide-react';
 
-import { CodeIcon, ImageIcon, TextIcon } from 'lucide-react';
+import { ImageIcon, TextIcon } from 'lucide-react';
 
 export const nodeButtons = [
   {
@@ -23,23 +22,5 @@ export const nodeButtons = [
     id: 'video',
     label: 'Video',
     icon: VideoIcon,
-  },
-  {
-    id: 'code',
-    label: 'Code',
-    icon: CodeIcon,
-    data: {
-      content: { language: 'javascript' },
-    },
-  },
-  {
-    id: 'file',
-    label: 'File',
-    icon: FileIcon,
-  },
-  {
-    id: 'tweet',
-    label: 'Tweet',
-    icon: SiX,
   },
 ];

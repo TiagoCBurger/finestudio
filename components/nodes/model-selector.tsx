@@ -157,7 +157,9 @@ export const ModelSelector = ({
 
   // Filter out disabled models defensively
   const enabledOptions = Object.fromEntries(
-    Object.entries(options).filter(([_, model]) => model.enabled !== false)
+    Object.entries(options).filter(([_, model]) =>
+      !model.disabled && model.enabled !== false
+    )
   );
 
   const activeModel = enabledOptions[value];
@@ -289,14 +291,14 @@ export const ModelSelector = ({
                         {formatCredits(
                           (() => {
                             try {
-                              const provider = model.providers[0];
+                              const provider = model.providers[0] as any;
                               if (!provider?.getCost) return 0;
                               // Try calling with duration parameter for video models
-                              return provider.getCost({ duration: 5 } as any) ?? 0;
+                              return provider.getCost({ duration: 5 }) ?? 0;
                             } catch {
                               // Fallback for image models that don't need parameters
                               try {
-                                return model.providers[0]?.getCost?.() ?? 0;
+                                return (model.providers[0] as any)?.getCost?.() ?? 0;
                               } catch {
                                 return 0;
                               }

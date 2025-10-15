@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n \"Next.js,Supabase\" \"next dev --turbopack\" \"npx supabase start\"",
+    "dev": "concurrently -n \"Next.js,Supabase\" \"next dev\" \"npx supabase start\"",
     "bump-deps": "npx npm-check-updates -u && pnpm install",
     "bump-ui": "npx shadcn@latest add --all --overwrite",
-    "build": "next build --turbopack",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "export": "email export",

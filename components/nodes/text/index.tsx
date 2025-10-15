@@ -1,6 +1,4 @@
 import type { JSONContent } from '@tiptap/core';
-import { useNodeConnections } from '@xyflow/react';
-import { TextPrimitive } from './primitive';
 import { TextTransform } from './transform';
 
 export type TextNodeProps = {
@@ -8,6 +6,7 @@ export type TextNodeProps = {
   data: {
     generated?: {
       text: string;
+      sources?: Array<{ type: string; url?: string; title?: string }>;
     };
     model?: string;
     updatedAt?: string;
@@ -18,16 +17,14 @@ export type TextNodeProps = {
 
     // Tiptap text content
     text?: string;
+
+    // Chat messages
+    messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   };
   id: string;
 };
 
 export const TextNode = (props: TextNodeProps) => {
-  const connections = useNodeConnections({
-    id: props.id,
-    handleType: 'target',
-  });
-  const Component = connections.length ? TextTransform : TextPrimitive;
-
-  return <Component {...props} title="Text" />;
+  // Sempre usa TextTransform, independente de ter conexões ou não
+  return <TextTransform {...props} title="Text" />;
 };

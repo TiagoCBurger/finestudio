@@ -3,8 +3,8 @@
 import { getSubscribedUser } from '@/lib/auth';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
-import { videoModels } from '@/lib/models/video';
-import { trackCreditUsage } from '@/lib/stripe';
+import { getAllVideoModels } from '@/lib/models/video';
+// Stripe removido - sem rastreamento de créditos
 import { createClient } from '@/lib/supabase/server';
 import { projects } from '@/schema';
 import type { Edge, Node, Viewport } from '@xyflow/react';
@@ -18,6 +18,8 @@ type GenerateVideoActionProps = {
     url: string;
     type: string;
   }[];
+  duration?: number;
+  aspectRatio?: string;
   nodeId: string;
   projectId: string;
 };
@@ -26,20 +28,23 @@ export const generateVideoAction = async ({
   modelId,
   prompt,
   images,
+  duration = 5,
+  aspectRatio = '16:9',
   nodeId,
   projectId,
 }: GenerateVideoActionProps): Promise<
   | {
-      nodeData: object;
-    }
+    nodeData: object;
+  }
   | {
-      error: string;
-    }
+    error: string;
+  }
 > => {
   try {
     const client = await createClient();
     const user = await getSubscribedUser();
-    const model = videoModels[modelId];
+    const allModels = getAllVideoModels();
+    const model = allModels[modelId];
 
     if (!model) {
       throw new Error('Model not found');
@@ -61,17 +66,14 @@ export const generateVideoAction = async ({
     const url = await provider.model.generate({
       prompt,
       imagePrompt: firstFrameImage,
-      duration: 5,
-      aspectRatio: '16:9',
+      duration: duration as 5,
+      aspectRatio,
     });
 
     const response = await fetch(url);
     const arrayBuffer = await response.arrayBuffer();
 
-    await trackCreditUsage({
-      action: 'generate_video',
-      cost: provider.getCost({ duration: 5 }),
-    });
+    // Rastreamento de créditos removido
 
     const blob = await client.storage
       .from('files')

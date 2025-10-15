@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAnalytics } from '@/hooks/use-analytics';
 import { download } from '@/lib/download';
 import { handleError } from '@/lib/error/handle';
-import { imageModels } from '@/lib/models/image';
+import { imageModels, getEnabledImageModels } from '@/lib/models/image';
 import { getImagesFromImageNodes, getTextFromTextNodes } from '@/lib/xyflow';
 import { useProject } from '@/providers/project';
 import { getIncomers, useReactFlow } from '@xyflow/react';
@@ -23,6 +23,7 @@ import {
   type ChangeEventHandler,
   type ComponentProps,
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -56,6 +57,9 @@ export const ImageTransform = ({
 }: ImageTransformProps) => {
   const { updateNodeData, getNodes, getEdges } = useReactFlow();
   const [loading, setLoading] = useState(false);
+  const [localInstructions, setLocalInstructions] = useState(
+    data.instructions ?? ''
+  );
   const project = useProject();
   const hasIncomingImageNodes =
     getImagesFromImageNodes(getIncomers({ id }, getNodes(), getEdges()))
@@ -81,6 +85,13 @@ export const ImageTransform = ({
 
       setLoading(true);
 
+      // Aviso para múltiplas imagens
+      if (imageNodes.length > 1) {
+        toast.info(
+          `Using ${imageNodes.length} images. The first image will be used as base.`
+        );
+      }
+
       analytics.track('canvas', 'node', 'generate', {
         type,
         textPromptsLength: textNodes.length,
@@ -91,21 +102,21 @@ export const ImageTransform = ({
 
       const response = imageNodes.length
         ? await editImageAction({
-            images: imageNodes,
-            instructions: data.instructions,
-            nodeId: id,
-            projectId: project.id,
-            modelId,
-            size,
-          })
+          images: imageNodes,
+          instructions: data.instructions,
+          nodeId: id,
+          projectId: project.id,
+          modelId,
+          size,
+        })
         : await generateImageAction({
-            prompt: textNodes.join('\n'),
-            modelId,
-            instructions: data.instructions,
-            projectId: project.id,
-            nodeId: id,
-            size,
-          });
+          prompt: textNodes.join('\n'),
+          modelId,
+          instructions: data.instructions,
+          projectId: project.id,
+          nodeId: id,
+          size,
+        });
 
       if ('error' in response) {
         throw new Error(response.error);
@@ -135,13 +146,44 @@ export const ImageTransform = ({
     updateNodeData,
   ]);
 
-  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> = (
-    event
-  ) => updateNodeData(id, { instructions: event.target.value });
+  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> =
+    useCallback(
+      (event) => {
+        setLocalInstructions(event.target.value);
+      },
+      []
+    );
+
+  const handleInstructionsBlur = useCallback(() => {
+    if (localInstructions !== data.instructions) {
+      updateNodeData(id, { instructions: localInstructions });
+    }
+  }, [localInstructions, data.instructions, id]);
+
+  // Sync local state with external changes
+  useEffect(() => {
+    if (data.instructions !== undefined && data.instructions !== localInstructions) {
+      setLocalInstructions(data.instructions);
+    }
+  }, [data.instructions]);
+
+  const handleModelChange = useCallback(
+    (value: string) => {
+      updateNodeData(id, { model: value });
+    },
+    [id]
+  );
+
+  const handleSizeChange = useCallback(
+    (value: string) => {
+      updateNodeData(id, { size: value });
+    },
+    [id]
+  );
 
   const toolbar = useMemo<ComponentProps<typeof NodeLayout>['toolbar']>(() => {
     const availableModels = Object.fromEntries(
-      Object.entries(imageModels).map(([key, model]) => [
+      Object.entries(getEnabledImageModels()).map(([key, model]) => [
         key,
         {
           ...model,
@@ -160,7 +202,7 @@ export const ImageTransform = ({
             options={availableModels}
             id={id}
             className="w-[200px] rounded-full"
-            onChange={(value) => updateNodeData(id, { model: value })}
+            onChange={handleModelChange}
           />
         ),
       },
@@ -174,7 +216,7 @@ export const ImageTransform = ({
             options={selectedModel?.sizes ?? []}
             id={id}
             className="w-[200px] rounded-full"
-            onChange={(value) => updateNodeData(id, { size: value })}
+            onChange={handleSizeChange}
           />
         ),
       });
@@ -183,30 +225,30 @@ export const ImageTransform = ({
     items.push(
       loading
         ? {
-            tooltip: 'Generating...',
-            children: (
-              <Button size="icon" className="rounded-full" disabled>
-                <Loader2Icon className="animate-spin" size={12} />
-              </Button>
-            ),
-          }
+          tooltip: 'Generating...',
+          children: (
+            <Button size="icon" className="rounded-full" disabled>
+              <Loader2Icon className="animate-spin" size={12} />
+            </Button>
+          ),
+        }
         : {
-            tooltip: data.generated?.url ? 'Regenerate' : 'Generate',
-            children: (
-              <Button
-                size="icon"
-                className="rounded-full"
-                onClick={handleGenerate}
-                disabled={loading || !project?.id}
-              >
-                {data.generated?.url ? (
-                  <RotateCcwIcon size={12} />
-                ) : (
-                  <PlayIcon size={12} />
-                )}
-              </Button>
-            ),
-          }
+          tooltip: data.generated?.url ? 'Regenerate' : 'Generate',
+          children: (
+            <Button
+              size="icon"
+              className="rounded-full"
+              onClick={handleGenerate}
+              disabled={loading || !project?.id}
+            >
+              {data.generated?.url ? (
+                <RotateCcwIcon size={12} />
+              ) : (
+                <PlayIcon size={12} />
+              )}
+            </Button>
+          ),
+        }
     );
 
     if (data.generated) {
@@ -244,7 +286,8 @@ export const ImageTransform = ({
     modelId,
     hasIncomingImageNodes,
     id,
-    updateNodeData,
+    handleModelChange,
+    handleSizeChange,
     selectedModel?.sizes,
     size,
     loading,
@@ -297,8 +340,9 @@ export const ImageTransform = ({
         />
       )}
       <Textarea
-        value={data.instructions ?? ''}
+        value={localInstructions}
         onChange={handleInstructionsChange}
+        onBlur={handleInstructionsBlur}
         placeholder="Enter instructions"
         className="shrink-0 resize-none rounded-none border-none bg-transparent! shadow-none focus-visible:ring-0"
       />

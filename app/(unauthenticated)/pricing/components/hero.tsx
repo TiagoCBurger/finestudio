@@ -29,7 +29,7 @@ import Link from 'next/link';
 import { type ComponentProps, type ReactNode, useMemo, useState } from 'react';
 
 type HeroProps = {
-  currentPlan?: 'hobby' | 'pro' | undefined;
+  currentPlan?: 'free' | 'hobby' | 'pro' | undefined;
   authenticated: boolean;
 };
 
@@ -148,7 +148,7 @@ export const Hero = ({ currentPlan, authenticated }: HeroProps) => {
       pro.ctaLink = `/api/checkout?product=pro&frequency=${yearly ? 'year' : 'month'}`;
     }
 
-    if (currentPlan === 'hobby') {
+    if (currentPlan === 'free' || currentPlan === 'hobby') {
       free.ctaText = 'Manage';
       pro.ctaText = 'Upgrade';
       pro.variant = 'default';
@@ -206,7 +206,7 @@ export const Hero = ({ currentPlan, authenticated }: HeroProps) => {
           </h1>
 
           <p className="max-w-3xl text-center text-muted-foreground tracking-[-0.01rem] sm:text-lg">
-            Tersa uses a flat fee and overage pricing model. This means you pay
+            Fine Studio uses a flat fee and overage pricing model. This means you pay
             a flat monthly cost which includes a certain amount of credits. If
             you exceed your credits, you just pay for the extra usage.
           </p>

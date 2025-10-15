@@ -51,7 +51,7 @@ const getStatusBadge = (status: AIToolStatus) => {
   const icons = {
     pending: <CircleIcon className="size-4" />,
     running: <ClockIcon className="size-4 animate-pulse" />,
-    completed: <CheckCircleIcon className="size-4 text-green-600" />,
+    completed: <CheckCircleIcon className="size-4 text-purple-600" />,
     error: <XCircleIcon className="size-4 text-red-600" />,
   } as const;
 

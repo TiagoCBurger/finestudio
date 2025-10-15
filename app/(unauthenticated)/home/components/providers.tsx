@@ -8,10 +8,10 @@ import {
 } from '@/components/ui/kibo-ui/marquee';
 import type { OpenAiIcon } from '@/lib/icons';
 
-import { imageModels } from '@/lib/models/image';
+import { getEnabledImageModels } from '@/lib/models/image';
 import { speechModels } from '@/lib/models/speech';
 import { transcriptionModels } from '@/lib/models/transcription';
-import { videoModels } from '@/lib/models/video';
+import { getEnabledVideoModels } from '@/lib/models/video';
 import { visionModels } from '@/lib/models/vision';
 import { providers } from '@/lib/providers';
 import { useGateway } from '@/providers/gateway/client';
@@ -20,10 +20,10 @@ export const Providers = () => {
   const { models: textModels } = useGateway();
 
   const allModels = [
-    ...Object.values(imageModels),
+    ...Object.values(getEnabledImageModels()),
     ...Object.values(speechModels),
     ...Object.values(transcriptionModels),
-    ...Object.values(videoModels),
+    ...Object.values(getEnabledVideoModels()),
     ...Object.values(visionModels),
     ...Object.values(textModels),
   ];

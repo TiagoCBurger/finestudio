@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  integer,
   json,
   pgTable,
   text,
@@ -21,13 +22,26 @@ export const projects = pgTable('project', {
   userId: varchar('user_id').notNull(),
   image: varchar('image'),
   members: text('members').array(),
-  welcomeProject: boolean('demo_project').notNull().default(false),
 });
 
 export const profile = pgTable('profile', {
   id: text('id').primaryKey().notNull(),
-  customerId: text('customer_id'),
-  subscriptionId: text('subscription_id'),
-  productId: text('product_id'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
   onboardedAt: timestamp('onboarded_at'),
+  // Sistema de créditos seguro
+  credits: integer('credits').default(100).notNull(),
+  creditsUsed: integer('credits_used').default(0).notNull(),
+});
+
+// Tabela de auditoria para rastrear uso de créditos
+export const creditTransactions = pgTable('credit_transactions', {
+  id: text('id').primaryKey().default(uuid).notNull(),
+  userId: text('user_id').notNull().references(() => profile.id),
+  amount: integer('amount').notNull(), // Negativo para débito, positivo para crédito
+  type: varchar('type').notNull(), // 'usage', 'purchase', 'bonus', 'refund'
+  modelUsed: varchar('model_used'), // Qual modelo foi usado
+  description: text('description'),
+  metadata: json('metadata'), // Dados extras (prompt, resultado, etc)
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });

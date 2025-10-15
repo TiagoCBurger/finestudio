@@ -1,12 +1,18 @@
 'use client';
 
 import { Logo } from '@/components/logo';
-import { ThemeSwitcher } from '@/components/ui/kibo-ui/theme-switcher';
+import { ThemeSwitcher } from '@/components/theme-switcher';
 import { useTheme } from 'next-themes';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
 export const SubFooter = () => {
   const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <div className="flex flex-col items-start justify-between gap-4 px-8 text-muted-foreground text-sm md:flex-row">
@@ -19,7 +25,7 @@ export const SubFooter = () => {
         <Link href="/terms">Terms</Link>
         <Link href="/acceptable-use">Acceptable Use</Link>
         <a
-          href="https://github.com/haydenbleasel/tersa"
+          href="https://github.com/haydenbleasel/fine-studio"
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -34,10 +40,7 @@ export const SubFooter = () => {
         </a>
       </div>
       <div className="flex items-center justify-end">
-        <ThemeSwitcher
-          value={theme as 'light' | 'dark' | 'system'}
-          onChange={setTheme}
-        />
+        {mounted && <ThemeSwitcher />}
       </div>
     </div>
   );

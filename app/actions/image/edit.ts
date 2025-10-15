@@ -4,7 +4,7 @@ import { getSubscribedUser } from '@/lib/auth';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
 import { imageModels } from '@/lib/models/image';
-import { trackCreditUsage } from '@/lib/stripe';
+// Stripe removido - sem rastreamento de créditos
 import { createClient } from '@/lib/supabase/server';
 import { projects } from '@/schema';
 import type { Edge, Node, Viewport } from '@xyflow/react';
@@ -91,11 +91,11 @@ export const editImageAction = async ({
   size,
 }: EditImageActionProps): Promise<
   | {
-      nodeData: object;
-    }
+    nodeData: object;
+  }
   | {
-      error: string;
-    }
+    error: string;
+  }
 > => {
   try {
     const client = await createClient();
@@ -130,13 +130,7 @@ export const editImageAction = async ({
         size,
       });
 
-      await trackCreditUsage({
-        action: 'generate_image',
-        cost: provider.getCost({
-          ...generatedImageResponse.usage,
-          size,
-        }),
-      });
+      // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
     } else {
@@ -144,23 +138,42 @@ export const editImageAction = async ({
         .then((res) => res.arrayBuffer())
         .then((buffer) => Buffer.from(buffer).toString('base64'));
 
+      const isFalProvider = provider.model.provider === 'fal';
+
+      // Para múltiplas imagens, crie um prompt mais detalhado
+      let enhancedPrompt = prompt;
+      if (images.length > 1) {
+        enhancedPrompt = `${prompt}
+
+MULTIPLE IMAGES CONTEXT:
+- Total images: ${images.length}
+- Primary image (base): Use as the main reference
+- Additional images: Incorporate their visual elements, style, composition, colors, and mood
+- Goal: Create a cohesive blend that combines the best aspects of all images
+- Style: Maintain artistic consistency while merging elements naturally
+
+Please analyze all the visual elements from the connected images and create a harmonious composition that incorporates elements from each image.`;
+      }
+
       const generatedImageResponse = await generateImage({
         model: provider.model,
-        prompt,
+        prompt: enhancedPrompt,
         size: size as never,
-        providerOptions: {
-          bfl: {
-            image: base64Image,
+        providerOptions: isFalProvider
+          ? {
+            fal: {
+              image: images[0].url, // Primeira imagem
+              images: images.map((img) => img.url), // Todas as imagens (para Nano Banana)
+            },
+          }
+          : {
+            bfl: {
+              image: base64Image,
+            },
           },
-        },
       });
 
-      await trackCreditUsage({
-        action: 'generate_image',
-        cost: provider.getCost({
-          size,
-        }),
-      });
+      // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
     }

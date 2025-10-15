@@ -15,7 +15,7 @@ import { notFound, redirect } from 'next/navigation';
 import { Suspense } from 'react';
 
 export const metadata: Metadata = {
-  title: 'Tersa',
+  title: 'Fine Studio',
   description: 'Create and share AI workflows',
 };
 
@@ -32,11 +32,7 @@ const Project = async ({ params }: ProjectProps) => {
   const profile = await currentUserProfile();
 
   if (!profile) {
-    return null;
-  }
-
-  if (!profile.onboardedAt) {
-    return redirect('/welcome');
+    return redirect('/sign-in');
   }
 
   const project = await database.query.projects.findFirst({

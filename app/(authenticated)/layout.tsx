@@ -27,17 +27,12 @@ const AuthenticatedLayout = async ({ children }: AuthenticatedLayoutProps) => {
     return null;
   }
 
-  let plan: SubscriptionContextType['plan'];
-
-  if (profile.productId === env.STRIPE_HOBBY_PRODUCT_ID) {
-    plan = 'hobby';
-  } else if (profile.productId === env.STRIPE_PRO_PRODUCT_ID) {
-    plan = 'pro';
-  }
+  // Subscription system removed - all users have free access
+  const plan: SubscriptionContextType['plan'] = 'free';
 
   return (
     <SubscriptionProvider
-      isSubscribed={Boolean(profile.subscriptionId)}
+      isSubscribed={true} // Everyone is "subscribed" (free access)
       plan={plan}
     >
       <GatewayProvider>

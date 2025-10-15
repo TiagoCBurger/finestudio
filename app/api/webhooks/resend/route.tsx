@@ -19,25 +19,33 @@ type WebhookPayload = {
 
     // https://github.com/supabase/auth/blob/master/internal/mailer/template.go#L56-L66
     email_action_type:
-      | 'signup'
-      | 'recovery'
-      | 'invite'
-      | 'magiclink'
-      | 'email_change'
-      | 'email'
-      | 'email_change_current'
-      | 'email_change_new'
-      | 'reauthentication';
+    | 'signup'
+    | 'recovery'
+    | 'invite'
+    | 'magiclink'
+    | 'email_change'
+    | 'email'
+    | 'email_change_current'
+    | 'email_change_new'
+    | 'reauthentication';
     site_url: string;
     token_new: string;
     token_hash_new: string;
   };
 };
 
-const resend = new Resend(env.RESEND_TOKEN);
+const resend = env.RESEND_TOKEN ? new Resend(env.RESEND_TOKEN) : null;
 
 export const POST = async (req: Request) => {
   try {
+    if (!env.SUPABASE_AUTH_HOOK_SECRET) {
+      throw new Error('SUPABASE_AUTH_HOOK_SECRET is not configured');
+    }
+
+    if (!env.RESEND_EMAIL || !resend) {
+      throw new Error('Resend is not configured');
+    }
+
     const payload = await req.text();
     const headers = Object.fromEntries(req.headers);
 
@@ -72,7 +80,7 @@ export const POST = async (req: Request) => {
           email={user.email}
         />
       );
-      subject = 'Confirm your email address for Tersa';
+      subject = 'Confirm your email address for Fine Studio';
     } else if (email_action_type === 'magiclink') {
       react = (
         <LoginEmailTemplate
@@ -80,7 +88,7 @@ export const POST = async (req: Request) => {
           email={user.email}
         />
       );
-      subject = 'Your magic link to login to Tersa';
+      subject = 'Your magic link to login to Fine Studio';
     } else if (email_action_type === 'recovery') {
       react = (
         <ForgotPasswordEmailTemplate
@@ -88,7 +96,7 @@ export const POST = async (req: Request) => {
           email={user.email}
         />
       );
-      subject = 'Reset your password for Tersa';
+      subject = 'Reset your password for Fine Studio';
     } else {
       throw new Error('Invalid email action type');
     }

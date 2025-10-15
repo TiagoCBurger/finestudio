@@ -6,7 +6,6 @@ import {
   AnthropicIcon,
   AzureIcon,
   BasetenIcon,
-  BlackForestLabsIcon,
   CerebrasIcon,
   CohereIcon,
   DeepSeekIcon,
@@ -113,11 +112,6 @@ export const providers = {
     id: 'lmnt',
     name: 'LMNT',
     icon: LmntIcon,
-  },
-  'black-forest-labs': {
-    id: 'black-forest-labs',
-    name: 'Black Forest Labs',
-    icon: BlackForestLabsIcon,
   },
   deepseek: {
     id: 'deepseek',

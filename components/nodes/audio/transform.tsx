@@ -20,7 +20,12 @@ import {
   PlayIcon,
   RotateCcwIcon,
 } from 'lucide-react';
-import { type ChangeEventHandler, type ComponentProps, useState } from 'react';
+import {
+  type ChangeEventHandler,
+  type ComponentProps,
+  useCallback,
+  useState,
+} from 'react';
 import { toast } from 'sonner';
 import { mutate } from 'swr';
 import type { AudioNodeProps } from '.';
@@ -113,6 +118,20 @@ export const AudioTransform = ({
     }
   };
 
+  const handleModelChange = useCallback(
+    (value: string) => {
+      updateNodeData(id, { model: value });
+    },
+    [id]
+  );
+
+  const handleVoiceChange = useCallback(
+    (value: string) => {
+      updateNodeData(id, { voice: value });
+    },
+    [id]
+  );
+
   const toolbar: ComponentProps<typeof NodeLayout>['toolbar'] = [
     {
       children: (
@@ -121,7 +140,7 @@ export const AudioTransform = ({
           options={speechModels}
           key={id}
           className="w-[200px] rounded-full"
-          onChange={(value) => updateNodeData(id, { model: value })}
+          onChange={handleModelChange}
         />
       ),
     },
@@ -135,7 +154,7 @@ export const AudioTransform = ({
           options={model.voices}
           key={id}
           className="w-[200px] rounded-full"
-          onChange={(value) => updateNodeData(id, { voice: value })}
+          onChange={handleVoiceChange}
         />
       ),
     });
@@ -144,30 +163,30 @@ export const AudioTransform = ({
   toolbar.push(
     loading
       ? {
-          tooltip: 'Generating...',
-          children: (
-            <Button size="icon" className="rounded-full" disabled>
-              <Loader2Icon className="animate-spin" size={12} />
-            </Button>
-          ),
-        }
+        tooltip: 'Generating...',
+        children: (
+          <Button size="icon" className="rounded-full" disabled>
+            <Loader2Icon className="animate-spin" size={12} />
+          </Button>
+        ),
+      }
       : {
-          tooltip: data.generated?.url ? 'Regenerate' : 'Generate',
-          children: (
-            <Button
-              size="icon"
-              className="rounded-full"
-              onClick={handleGenerate}
-              disabled={loading || !project?.id}
-            >
-              {data.generated?.url ? (
-                <RotateCcwIcon size={12} />
-              ) : (
-                <PlayIcon size={12} />
-              )}
-            </Button>
-          ),
-        }
+        tooltip: data.generated?.url ? 'Regenerate' : 'Generate',
+        children: (
+          <Button
+            size="icon"
+            className="rounded-full"
+            onClick={handleGenerate}
+            disabled={loading || !project?.id}
+          >
+            {data.generated?.url ? (
+              <RotateCcwIcon size={12} />
+            ) : (
+              <PlayIcon size={12} />
+            )}
+          </Button>
+        ),
+      }
   );
 
   if (data.generated) {
@@ -200,9 +219,13 @@ export const AudioTransform = ({
     });
   }
 
-  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> = (
-    event
-  ) => updateNodeData(id, { instructions: event.target.value });
+  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> =
+    useCallback(
+      (event) => {
+        updateNodeData(id, { instructions: event.target.value });
+      },
+      [id]
+    );
 
   return (
     <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>

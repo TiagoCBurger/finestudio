@@ -7,7 +7,7 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 export const metadata: Metadata = {
-  title: 'Tersa',
+  title: 'Fine Studio',
   description: 'Create and share AI workflows',
 };
 
@@ -22,8 +22,8 @@ const Projects = async () => {
 
   const profile = await currentUserProfile();
 
-  if (!profile?.onboardedAt) {
-    return redirect('/welcome');
+  if (!profile) {
+    return redirect('/sign-in');
   }
 
   let project = await database.query.projects.findFirst({

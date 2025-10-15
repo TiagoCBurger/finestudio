@@ -1,17 +1,5 @@
 import { NodeLayout } from '@/components/nodes/layout';
 import { Button } from '@/components/ui/button';
-import {
-  AIMessage,
-  AIMessageContent,
-} from '@/components/ui/kibo-ui/ai/message';
-import { AIResponse } from '@/components/ui/kibo-ui/ai/response';
-import {
-  AISource,
-  AISources,
-  AISourcesContent,
-  AISourcesTrigger,
-} from '@/components/ui/kibo-ui/ai/source';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useAnalytics } from '@/hooks/use-analytics';
 import { useReasoning } from '@/hooks/use-reasoning';
@@ -24,12 +12,14 @@ import {
   getTranscriptionFromAudioNodes,
   getTweetContentFromTweetNodes,
 } from '@/lib/xyflow';
+import { getEnabledTextModels, type TextModel } from '@/lib/models/text';
+import type { TersaModel } from '@/lib/providers';
+import { providers } from '@/lib/providers';
 import { useGateway } from '@/providers/gateway/client';
 import { useProject } from '@/providers/project';
 import { ReasoningTunnel } from '@/tunnels/reasoning';
-import { useChat } from '@ai-sdk/react';
 import { getIncomers, useReactFlow } from '@xyflow/react';
-import { DefaultChatTransport, type FileUIPart } from 'ai';
+import { useChatStream } from '@/hooks/use-chat-stream';
 import {
   ClockIcon,
   CopyIcon,
@@ -44,7 +34,6 @@ import {
   useEffect,
   useMemo,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 import { mutate } from 'swr';
 import type { TextNodeProps } from '.';
@@ -54,9 +43,9 @@ type TextTransformProps = TextNodeProps & {
   title: string;
 };
 
-const getDefaultModel = (models: ReturnType<typeof useGateway>['models']) => {
+const getDefaultModel = (models: Record<string, TersaModel | TextModel>) => {
   const defaultModel = Object.entries(models).find(
-    ([_, model]) => model.default
+    ([_, model]) => 'default' in model && model.default
   );
 
   if (!defaultModel) {
@@ -74,21 +63,54 @@ export const TextTransform = ({
 }: TextTransformProps) => {
   const { updateNodeData, getNodes, getEdges } = useReactFlow();
   const project = useProject();
-  const { models } = useGateway();
-  const modelId = data.model ?? getDefaultModel(models);
+  const { models: gatewayModels } = useGateway();
+
+  // Merge OpenRouter models with Gateway models
+  const allModels = useMemo(() => {
+    const openRouterModels = getEnabledTextModels();
+
+    // Convert OpenRouter models to TersaModel format
+    const convertedOpenRouterModels: Record<string, TersaModel> = {};
+    for (const [id, model] of Object.entries(openRouterModels)) {
+      // Extract the provider from the model ID (e.g., "openai" from "openai/gpt-5-pro")
+      const [providerKey] = id.split('/');
+      const provider = providerKey in providers
+        ? providers[providerKey as keyof typeof providers]
+        : providers.unknown;
+
+      convertedOpenRouterModels[id] = {
+        label: model.label,
+        chef: provider,
+        providers: [provider],
+        disabled: !model.enabled,
+        default: model.default,
+      };
+    }
+
+    return { ...gatewayModels, ...convertedOpenRouterModels };
+  }, [gatewayModels]);
+
+  const modelId = data.model ?? getDefaultModel(allModels);
   const analytics = useAnalytics();
   const [reasoning, setReasoning] = useReasoning();
-  const { sendMessage, messages, setMessages, status, stop } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/chat',
-    }),
+  const { sendMessage, messages, setMessages, status, stop } = useChatStream({
+    api: '/api/chat',
     onError: (error) => handleError('Error generating text', error),
     onFinish: ({ message }) => {
+      console.log('Transform - onFinish called');
+      console.log('Transform - Message:', message);
+      console.log('Transform - Message parts:', message.parts);
+      
+      const textContent = message.parts.find((part) => part.type === 'text')?.text ?? '';
+      const sources = message.parts?.filter((part) => part.type === 'source-url') ?? [];
+
+      console.log('Transform - Text content:', textContent);
+      console.log('Transform - Sources:', sources);
+
       updateNodeData(id, {
         generated: {
-          text: message.parts.find((part) => part.type === 'text')?.text ?? '',
-          sources:
-            message.parts?.filter((part) => part.type === 'source-url') ?? [],
+          text: textContent,
+          sources: sources,
         },
         updatedAt: new Date().toISOString(),
       });
@@ -149,7 +171,7 @@ export const TextTransform = ({
       fileCount: files.length,
     });
 
-    const attachments: FileUIPart[] = [];
+    const attachments: Array<{ type: string; url: string; mediaType: string }> = [];
 
     for (const image of images) {
       attachments.push({
@@ -191,14 +213,25 @@ export const TextTransform = ({
     setMessages,
   ]);
 
-  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> = (
-    event
-  ) => updateNodeData(id, { instructions: event.target.value });
+  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> =
+    useCallback(
+      (event) => {
+        updateNodeData(id, { instructions: event.target.value });
+      },
+      [id]
+    );
 
   const handleCopy = useCallback((text: string) => {
     navigator.clipboard.writeText(text);
     toast.success('Copied to clipboard');
   }, []);
+
+  const handleModelChange = useCallback(
+    (value: string) => {
+      updateNodeData(id, { model: value });
+    },
+    [id]
+  );
 
   const toolbar = useMemo(() => {
     const items: ComponentProps<typeof NodeLayout>['toolbar'] = [];
@@ -207,10 +240,10 @@ export const TextTransform = ({
       children: (
         <ModelSelector
           value={modelId}
-          options={models}
+          options={allModels}
           key={id}
           className="w-[200px] rounded-full"
-          onChange={(value) => updateNodeData(id, { model: value })}
+          onChange={handleModelChange}
         />
       ),
     });
@@ -232,12 +265,12 @@ export const TextTransform = ({
     } else if (messages.length || data.generated?.text) {
       const text = messages.length
         ? messages
-            .filter((message) => message.role === 'assistant')
-            .map(
-              (message) =>
-                message.parts.find((part) => part.type === 'text')?.text ?? ''
-            )
-            .join('\n')
+          .filter((message) => message.role === 'assistant')
+          .map(
+            (message) =>
+              message.parts.find((part) => part.type === 'text')?.text ?? ''
+          )
+          .join('\n')
         : data.generated?.text;
 
       items.push({
@@ -302,7 +335,7 @@ export const TextTransform = ({
     data.generated?.text,
     data.updatedAt,
     handleGenerate,
-    updateNodeData,
+    handleModelChange,
     modelId,
     id,
     messages,
@@ -310,7 +343,7 @@ export const TextTransform = ({
     status,
     stop,
     handleCopy,
-    models,
+    allModels,
   ]);
 
   const nonUserMessages = messages.filter((message) => message.role !== 'user');
@@ -325,80 +358,61 @@ export const TextTransform = ({
     }
   }, [messages, reasoning, status, setReasoning]);
 
+  const handleOutputChange: ChangeEventHandler<HTMLTextAreaElement> =
+    useCallback(
+      (event) => {
+        updateNodeData(id, {
+          generated: {
+            text: event.target.value,
+            sources: data.generated?.sources ?? [],
+          }
+        });
+      },
+      [id, data.generated?.sources]
+    );
+
+  const outputText = useMemo(() => {
+    console.log('Transform - Status:', status);
+    console.log('Transform - Messages count:', messages.length);
+    console.log('Transform - Non-user messages count:', nonUserMessages.length);
+    console.log('Transform - Generated text:', data.generated?.text);
+    
+    // During streaming, show messages from the chat
+    if (status === 'streaming' && nonUserMessages.length) {
+      const text = nonUserMessages
+        .map(
+          (message) =>
+            message.parts.find((part) => part.type === 'text')?.text ?? ''
+        )
+        .join('\n');
+      console.log('Transform - Streaming text:', text);
+      return text;
+    }
+    // After streaming completes, show the saved generated text
+    return data.generated?.text ?? '';
+  }, [status, nonUserMessages, data.generated?.text, messages]);
+
+  const getPlaceholder = () => {
+    if (status === 'submitted') return 'Generating...';
+    if (status === 'streaming') return 'Streaming response...';
+    if (!outputText) return 'Press ▶ to generate text';
+    return '';
+  };
+
   return (
     <NodeLayout id={id} data={data} title={title} type={type} toolbar={toolbar}>
-      <div className="nowheel h-full max-h-[30rem] flex-1 overflow-auto rounded-t-3xl rounded-b-xl bg-secondary p-4">
-        {status === 'submitted' && (
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-4 w-60 animate-pulse rounded-lg" />
-            <Skeleton className="h-4 w-40 animate-pulse rounded-lg" />
-            <Skeleton className="h-4 w-50 animate-pulse rounded-lg" />
-          </div>
-        )}
-        {data.generated?.text &&
-          !nonUserMessages.length &&
-          status !== 'submitted' && (
-            <ReactMarkdown>{data.generated.text}</ReactMarkdown>
-          )}
-        {!data.generated?.text &&
-          !nonUserMessages.length &&
-          status !== 'submitted' && (
-            <div className="flex aspect-video w-full items-center justify-center bg-secondary">
-              <p className="text-muted-foreground text-sm">
-                Press <PlayIcon size={12} className="-translate-y-px inline" />{' '}
-                to generate text
-              </p>
-            </div>
-          )}
-        {Boolean(nonUserMessages.length) &&
-          status !== 'submitted' &&
-          nonUserMessages.map((message) => (
-            <AIMessage
-              key={message.id}
-              from={message.role === 'assistant' ? 'assistant' : 'user'}
-              className="p-0 [&>div]:max-w-none"
-            >
-              <div>
-                {Boolean(
-                  message.parts.filter((part) => part.type === 'source-url')
-                    ?.length
-                ) && (
-                  <AISources>
-                    <AISourcesTrigger
-                      count={
-                        message.parts.filter(
-                          (part) => part.type === 'source-url'
-                        ).length
-                      }
-                    />
-                    <AISourcesContent>
-                      {message.parts
-                        .filter((part) => part.type === 'source-url')
-                        .map(({ url, title }) => (
-                          <AISource
-                            key={url ?? ''}
-                            href={url}
-                            title={title ?? new URL(url).hostname}
-                          />
-                        ))}
-                    </AISourcesContent>
-                  </AISources>
-                )}
-                <AIMessageContent className="bg-transparent p-0">
-                  <AIResponse>
-                    {message.parts.find((part) => part.type === 'text')?.text ??
-                      ''}
-                  </AIResponse>
-                </AIMessageContent>
-              </div>
-            </AIMessage>
-          ))}
-      </div>
+      <Textarea
+        value={outputText}
+        onChange={handleOutputChange}
+        placeholder={getPlaceholder()}
+        readOnly={status === 'submitted' || status === 'streaming'}
+        className="nowheel h-full min-h-[20rem] flex-1 resize-none rounded-t-3xl rounded-b-none border-none bg-secondary p-4 shadow-none focus-visible:ring-0"
+      />
       <Textarea
         value={data.instructions ?? ''}
         onChange={handleInstructionsChange}
         placeholder="Enter instructions"
-        className="shrink-0 resize-none rounded-none border-none bg-transparent! shadow-none focus-visible:ring-0"
+        className="shrink-0 resize-none rounded-none border-none bg-transparent shadow-none focus-visible:ring-0"
       />
       <ReasoningTunnel.In>
         {messages.flatMap((message) =>

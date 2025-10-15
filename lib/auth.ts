@@ -1,4 +1,4 @@
-import { getCredits } from '@/app/actions/credits/get';
+// Credits system removed
 import { profile } from '@/schema';
 import { eq } from 'drizzle-orm';
 import { database } from './database';
@@ -56,24 +56,9 @@ export const getSubscribedUser = async () => {
     throw new Error('User profile not found');
   }
 
-  if (!profile.subscriptionId) {
-    throw new Error('Claim your free AI credits to use this feature.');
-  }
+  // Subscription check removed - free access for all users
 
-  const credits = await getCredits();
-
-  if ('error' in credits) {
-    throw new Error(credits.error);
-  }
-
-  if (
-    profile.productId === env.STRIPE_HOBBY_PRODUCT_ID &&
-    credits.credits <= 0
-  ) {
-    throw new Error(
-      'Sorry, you have no credits remaining! Please upgrade for more credits.'
-    );
-  }
+  // Sistema de créditos removido - acesso livre para todos
 
   return user;
 };

@@ -1,8 +1,8 @@
-![Tersa image](/app/opengraph-image.png)
+![Fine Studio image](/app/opengraph-image.png)
 
-# Tersa
+# Fine Studio
 
-A visual AI playground. Tersa is an open source canvas for building AI workflows. Drag, drop connect and run nodes to build your own workflows powered by various industry-leading AI models.
+A visual AI playground. Fine Studio is an open source canvas for building AI workflows. Drag, drop connect and run nodes to build your own workflows powered by various industry-leading AI models.
 
 ## Features
 
@@ -39,8 +39,8 @@ A visual AI playground. Tersa is an open source canvas for building AI workflows
 
 1. Clone the repository
    ```sh
-   git clone https://github.com/haydenbleasel/tersa.git
-   cd tersa
+   git clone https://github.com/haydenbleasel/fine-studio.git
+   cd fine-studio
    ```
 
 2. Install dependencies

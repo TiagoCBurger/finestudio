@@ -17,7 +17,8 @@ export const SignUpForm = () => {
   const [captchaToken, setCaptchaToken] = useState<string | undefined>(
     undefined
   );
-  const disabled = isLoading || !email || !password || !captchaToken;
+  // Turnstile desabilitado para desenvolvimento local
+  const disabled = isLoading || !email || !password;
 
   const handleEmailSignUp: FormEventHandler<HTMLFormElement> = async (
     event
@@ -35,7 +36,7 @@ export const SignUpForm = () => {
             '/auth/confirm',
             window.location.origin
           ).toString(),
-          captchaToken,
+          // captchaToken desabilitado para desenvolvimento local
         },
       });
 
@@ -83,12 +84,13 @@ export const SignUpForm = () => {
           </Button>
         </div>
       </form>
-      <div className="mt-4">
+      {/* Turnstile desabilitado para desenvolvimento local */}
+      {/* <div className="mt-4">
         <Turnstile
           siteKey={env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
           onSuccess={setCaptchaToken}
         />
-      </div>
+      </div> */}
     </>
   );
 };

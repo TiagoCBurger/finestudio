@@ -12,10 +12,9 @@ import {
 } from '@/lib/xyflow';
 import { useGateway } from '@/providers/gateway/client';
 import { useProject } from '@/providers/project';
-import { useChat } from '@ai-sdk/react';
 import Editor from '@monaco-editor/react';
 import { getIncomers, useReactFlow } from '@xyflow/react';
-import { DefaultChatTransport } from 'ai';
+import { useChatStream } from '@/hooks/use-chat-stream';
 import { ClockIcon, PlayIcon, RotateCcwIcon, SquareIcon } from 'lucide-react';
 import {
   type ChangeEventHandler,
@@ -57,10 +56,8 @@ export const CodeTransform = ({
   const modelId = data.model ?? getDefaultModel(textModels);
   const language = data.generated?.language ?? 'javascript';
   const analytics = useAnalytics();
-  const { messages, sendMessage, setMessages, status, stop } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/code',
-    }),
+  const { messages, sendMessage, setMessages, status, stop } = useChatStream({
+    api: '/api/code',
     onError: (error) => handleError('Error generating text', error),
     onFinish: ({ message }) => {
       updateNodeData(id, {
@@ -142,15 +139,22 @@ export const CodeTransform = ({
     type,
   ]);
 
-  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> = (
-    event
-  ) => updateNodeData(id, { instructions: event.target.value });
+  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> =
+    useCallback(
+      (event) => {
+        updateNodeData(id, { instructions: event.target.value });
+      },
+      [id]
+    );
 
-  const handleCodeChange = (value: string | undefined) => {
-    updateNodeData(id, {
-      generated: { text: value, language },
-    });
-  };
+  const handleCodeChange = useCallback(
+    (value: string | undefined) => {
+      updateNodeData(id, {
+        generated: { text: value, language },
+      });
+    },
+    [id, language]
+  );
 
   const handleLanguageChange = useCallback(
     (value: string) => {
@@ -158,7 +162,14 @@ export const CodeTransform = ({
         generated: { text: data.generated?.text, language: value },
       });
     },
-    [data.generated?.text, id, updateNodeData]
+    [data.generated?.text, id]
+  );
+
+  const handleModelChange = useCallback(
+    (value: string) => {
+      updateNodeData(id, { model: value });
+    },
+    [id]
   );
 
   const toolbar = useMemo(() => {
@@ -179,7 +190,7 @@ export const CodeTransform = ({
             options={textModels}
             key={id}
             className="w-[200px] rounded-full"
-            onChange={(value) => updateNodeData(id, { model: value })}
+            onChange={handleModelChange}
           />
         ),
       },
@@ -246,7 +257,7 @@ export const CodeTransform = ({
     return items;
   }, [
     id,
-    updateNodeData,
+    handleModelChange,
     stop,
     data,
     handleGenerate,
@@ -269,7 +280,7 @@ export const CodeTransform = ({
         value={
           nonUserMessages.length
             ? (nonUserMessages[0].parts.find((part) => part.type === 'text')
-                ?.text ?? '')
+              ?.text ?? '')
             : data.generated?.text
         }
         onChange={handleCodeChange}

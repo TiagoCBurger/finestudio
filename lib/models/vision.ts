@@ -130,14 +130,4 @@ export const visionModels: Record<string, TersaVisionModel> = {
       },
     ],
   },
-  'openai-gpt-image-1': {
-    label: 'GPT Image 1',
-    chef: providers.openai,
-    providers: [
-      {
-        ...providers.openai,
-        model: openai('gpt-image-1'),
-      },
-    ],
-  },
 };

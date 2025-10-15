@@ -24,15 +24,14 @@ if (!defaultVisionModel) {
 }
 
 export const createProjectAction = async (
-  name: string,
-  welcomeProject?: boolean
+  name: string
 ): Promise<
   | {
-      id: string;
-    }
+    id: string;
+  }
   | {
-      error: string;
-    }
+    error: string;
+  }
 > => {
   try {
     const user = await currentUser();
@@ -48,7 +47,6 @@ export const createProjectAction = async (
         userId: user.id,
         transcriptionModel: defaultTranscriptionModel[0],
         visionModel: defaultVisionModel[0],
-        welcomeProject,
       })
       .returning({ id: projects.id });
 

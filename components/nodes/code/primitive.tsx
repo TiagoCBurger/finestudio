@@ -1,6 +1,6 @@
 import Editor from '@monaco-editor/react';
 import { useReactFlow } from '@xyflow/react';
-import type { ComponentProps } from 'react';
+import { useCallback, type ComponentProps } from 'react';
 import type { CodeNodeProps } from '.';
 import { NodeLayout } from '../layout';
 import { LanguageSelector } from './language-selector';
@@ -17,17 +17,23 @@ export const CodePrimitive = ({
 }: CodePrimitiveProps) => {
   const { updateNodeData } = useReactFlow();
 
-  const handleCodeChange = (value: string | undefined) => {
-    updateNodeData(id, {
-      content: { text: value, language: data.content?.language },
-    });
-  };
+  const handleCodeChange = useCallback(
+    (value: string | undefined) => {
+      updateNodeData(id, {
+        content: { text: value, language: data.content?.language },
+      });
+    },
+    [id, data.content?.language]
+  );
 
-  const handleLanguageChange = (value: string) => {
-    updateNodeData(id, {
-      content: { text: data.content?.text, language: value },
-    });
-  };
+  const handleLanguageChange = useCallback(
+    (value: string) => {
+      updateNodeData(id, {
+        content: { text: data.content?.text, language: value },
+      });
+    },
+    [id, data.content?.text]
+  );
 
   const toolbar: ComponentProps<typeof NodeLayout>['toolbar'] = [
     {

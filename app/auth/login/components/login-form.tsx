@@ -19,7 +19,8 @@ export const LoginForm = () => {
   const [captchaToken, setCaptchaToken] = useState<string | undefined>(
     undefined
   );
-  const disabled = isLoading || !email || !password || !captchaToken;
+  // Turnstile desabilitado para desenvolvimento local
+  const disabled = isLoading || !email || !password;
 
   const handleEmailLogin: FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
@@ -30,9 +31,8 @@ export const LoginForm = () => {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          captchaToken,
-        },
+        // Captcha desabilitado para desenvolvimento local
+        // options: { captchaToken },
       });
 
       if (error) {
@@ -87,12 +87,13 @@ export const LoginForm = () => {
           </Button>
         </div>
       </form>
-      <div className="mt-4">
+      {/* Turnstile desabilitado para desenvolvimento local */}
+      {/* <div className="mt-4">
         <Turnstile
           siteKey={env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
           onSuccess={setCaptchaToken}
         />
-      </div>
+      </div> */}
     </>
   );
 };

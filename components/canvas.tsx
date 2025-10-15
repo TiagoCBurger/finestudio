@@ -29,10 +29,11 @@ import {
 } from '@xyflow/react';
 import { BoxSelectIcon, PlusIcon } from 'lucide-react';
 import { nanoid } from 'nanoid';
-import type { MouseEvent, MouseEventHandler } from 'react';
-import { useCallback, useState } from 'react';
+import type { MouseEvent, MouseEventHandler, ClipboardEvent } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useDebouncedCallback } from 'use-debounce';
+import { uploadFile } from '@/lib/upload';
 import { ConnectionLine } from './connection-line';
 import { edgeTypes } from './edges';
 import { nodeTypes } from './nodes';
@@ -337,6 +338,70 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
     setNodes((nodes: Node[]) => [...nodes, ...newNodes]);
   }, [copiedNodes]);
 
+  const handleImagePaste = useCallback(
+    async (event: ClipboardEvent) => {
+      if (!project?.id) {
+        return;
+      }
+
+      const items = event.clipboardData?.items;
+      if (!items) {
+        return;
+      }
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        
+        if (item.type.indexOf('image') !== -1) {
+          event.preventDefault();
+          
+          const file = item.getAsFile();
+          if (!file) {
+            continue;
+          }
+
+          try {
+            // Create node first
+            const nodeId = nanoid();
+            const newNode: Node = {
+              id: nodeId,
+              type: 'image',
+              data: {},
+              position: screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
+              origin: [0, 0.5],
+            };
+
+            setNodes((nds: Node[]) => nds.concat(newNode));
+
+            // Upload the image
+            const { url, type } = await uploadFile(file, 'files');
+
+            // Update node with uploaded image
+            updateNode(nodeId, {
+              data: {
+                content: {
+                  url,
+                  type,
+                },
+              },
+            });
+
+            save();
+
+            analytics.track('canvas', 'image', 'pasted', {
+              type,
+            });
+          } catch (error) {
+            handleError('Error pasting image', error);
+          }
+
+          break;
+        }
+      }
+    },
+    [project?.id, screenToFlowPosition, updateNode, save, analytics]
+  );
+
   const handleDuplicateAll = useCallback(() => {
     const selected = getNodes().filter((node) => node.selected);
 
@@ -373,6 +438,19 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
     enableOnContentEditable: false,
     preventDefault: true,
   });
+
+  // Handle paste event for images
+  useEffect(() => {
+    const handlePasteEvent = (event: any) => {
+      handleImagePaste(event);
+    };
+
+    document.addEventListener('paste', handlePasteEvent);
+
+    return () => {
+      document.removeEventListener('paste', handlePasteEvent);
+    };
+  }, [handleImagePaste]);
 
   return (
     <NodeOperationsProvider addNode={addNode} duplicateNode={duplicateNode}>

@@ -96,20 +96,7 @@ export const Menu = () => {
           <DropdownMenuItem onClick={handleOpenProfile}>
             Profile
           </DropdownMenuItem>
-          {isSubscribed && (
-            <DropdownMenuItem asChild className="justify-between">
-              <a href="/api/portal" target="_blank" rel="noopener noreferrer">
-                Billing{' '}
-                <ArrowUpRightIcon size={16} className="text-muted-foreground" />
-              </a>
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem asChild>
-            <Link href="/pricing" className="flex items-center justify-between">
-              <span>Upgrade</span>
-              <ArrowUpRight size={16} className="text-muted-foreground" />
-            </Link>
-          </DropdownMenuItem>
+          {/* Billing e Upgrade removidos - sem sistema de cobrança */}
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <a

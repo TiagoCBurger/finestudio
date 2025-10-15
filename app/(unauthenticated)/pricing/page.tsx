@@ -4,23 +4,20 @@ import type { Metadata } from 'next';
 import { Hero } from './components/hero';
 
 export const metadata: Metadata = {
-  title: 'Tersa | Pricing',
+  title: 'Fine Studio | Pricing',
   description: 'Choose a plan to get access to all features.',
 };
 
 const PricingPage = async () => {
   const user = await currentUser();
-  let currentPlan: 'hobby' | 'pro' | undefined;
+  let currentPlan: 'free' | 'hobby' | 'pro' | undefined;
 
   if (user) {
     const profile = await currentUserProfile();
 
+    // Pricing system removed - all users have free access
     if (profile) {
-      if (profile.productId === env.STRIPE_HOBBY_PRODUCT_ID) {
-        currentPlan = 'hobby';
-      } else if (profile.productId === env.STRIPE_PRO_PRODUCT_ID) {
-        currentPlan = 'pro';
-      }
+      currentPlan = 'free';
     }
   }
 

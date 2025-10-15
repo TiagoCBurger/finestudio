@@ -21,6 +21,7 @@ import {
   ChevronUpIcon,
   ChevronsDownIcon,
   ChevronsUpIcon,
+  Coins,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '../ui/button';
@@ -44,13 +45,20 @@ type ModelSelectorProps = {
   disabled?: boolean;
 };
 
+const formatCredits = (cost: number): string => {
+  if (cost === 0) return 'Grátis';
+  if (cost < 0.01) return '<0.01';
+  if (cost >= 1) return cost.toFixed(0);
+  return cost.toFixed(3);
+};
+
 const getCostBracketIcon = (bracket: PriceBracket, className?: string) => {
   switch (bracket) {
     case 'lowest':
       return (
         <ChevronsDownIcon
           size={16}
-          className={cn('text-green-500 dark:text-green-400', className)}
+          className={cn('text-purple-500 dark:text-purple-400', className)}
         />
       );
     case 'low':
@@ -146,15 +154,25 @@ export const ModelSelector = ({
 }: ModelSelectorProps) => {
   const [open, setOpen] = useState(false);
   const { plan } = useSubscription();
-  const activeModel = options[value];
+
+  // Filter out disabled models defensively
+  const enabledOptions = Object.fromEntries(
+    Object.entries(options).filter(([_, model]) => model.enabled !== false)
+  );
+
+  const activeModel = enabledOptions[value];
 
   useEffect(() => {
-    if (value && !options[value]) {
-      onChange?.(Object.keys(options)[0]);
+    if (value && !enabledOptions[value]) {
+      const firstKey = Object.keys(enabledOptions)[0];
+      if (firstKey) {
+        onChange?.(firstKey);
+      }
     }
-  }, [value, options, onChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
-  const groupedOptions = Object.entries(options).reduce(
+  const groupedOptions = Object.entries(enabledOptions).reduce(
     (acc, [id, model]) => {
       const chef = model.chef.id;
 
@@ -168,16 +186,18 @@ export const ModelSelector = ({
     {} as Record<string, Record<string, TersaModel>>
   );
 
-  const sortedChefs = Object.keys(groupedOptions).sort((a, b) => {
-    const aName = Object.values(providers)
-      .find((provider) => provider.id === a)
-      ?.name.toLowerCase();
-    const bName = Object.values(providers)
-      .find((provider) => provider.id === b)
-      ?.name.toLowerCase();
+  const sortedChefs = Object.keys(groupedOptions)
+    .filter((chef) => Object.keys(groupedOptions[chef]).length > 0) // Filter out empty groups
+    .sort((a, b) => {
+      const aName = Object.values(providers)
+        .find((provider) => provider.id === a)
+        ?.name.toLowerCase();
+      const bName = Object.values(providers)
+        .find((provider) => provider.id === b)
+        ?.name.toLowerCase();
 
-    return aName?.localeCompare(bName ?? '') ?? 0;
-  });
+      return aName?.localeCompare(bName ?? '') ?? 0;
+    });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -231,7 +251,7 @@ export const ModelSelector = ({
                     disabled={getModelDisabled(model, plan)}
                     className={cn(
                       value === id &&
-                        'bg-primary text-primary-foreground data-[selected=true]:bg-primary/80 data-[selected=true]:text-primary-foreground'
+                      'bg-primary text-primary-foreground data-[selected=true]:bg-primary/80 data-[selected=true]:text-primary-foreground'
                     )}
                   >
                     <div className="flex flex-1 items-center gap-2 overflow-hidden">
@@ -248,45 +268,60 @@ export const ModelSelector = ({
                       />
                       <span className="block truncate">{model.label}</span>
                     </div>
-                    {model.providers.map((provider, index) => (
-                      <div
-                        key={provider.id}
-                        className={cn(index && 'opacity-50')}
+                    <div className="flex items-center gap-1">
+                      <Coins
+                        size={14}
+                        className={cn(
+                          'shrink-0',
+                          value === id
+                            ? 'text-primary-foreground'
+                            : 'text-muted-foreground'
+                        )}
+                      />
+                      <span
+                        className={cn(
+                          'text-sm',
+                          value === id
+                            ? 'text-primary-foreground'
+                            : 'text-muted-foreground'
+                        )}
                       >
-                        <div
-                          className={cn(
-                            'flex size-4 items-center justify-center rounded-full bg-secondary',
-                            value === id && 'bg-primary-foreground/10'
-                          )}
-                        >
-                          <provider.icon
-                            className={cn(
-                              'size-3 shrink-0',
-                              value === id
-                                ? 'text-primary-foreground'
-                                : 'text-muted-foreground'
-                            )}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                    {model.priceIndicator ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div>
-                            {getCostBracketIcon(
-                              model.priceIndicator,
-                              value === id ? 'text-primary-foreground' : ''
-                            )}
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          <p>{getCostBracketLabel(model.priceIndicator)}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <div className="size-4" />
-                    )}
+                        {formatCredits(
+                          (() => {
+                            try {
+                              const provider = model.providers[0];
+                              if (!provider?.getCost) return 0;
+                              // Try calling with duration parameter for video models
+                              return provider.getCost({ duration: 5 } as any) ?? 0;
+                            } catch {
+                              // Fallback for image models that don't need parameters
+                              try {
+                                return model.providers[0]?.getCost?.() ?? 0;
+                              } catch {
+                                return 0;
+                              }
+                            }
+                          })()
+                        )}
+                      </span>
+                      {model.priceIndicator ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div>
+                              {getCostBracketIcon(
+                                model.priceIndicator,
+                                value === id ? 'text-primary-foreground' : ''
+                              )}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="right">
+                            <p>{getCostBracketLabel(model.priceIndicator)}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <div className="size-4" />
+                      )}
+                    </div>
                   </CommandItem>
                 ))}
               </CommandGroup>

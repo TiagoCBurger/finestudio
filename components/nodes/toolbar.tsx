@@ -6,11 +6,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 type NodeToolbarProps = {
   id: string;
   items:
-    | {
-        tooltip?: string;
-        children: ReactNode;
-      }[]
-    | undefined;
+  | {
+    tooltip?: string;
+    children: ReactNode;
+  }[]
+  | undefined;
 };
 
 export const NodeToolbar = ({ id, items }: NodeToolbarProps) => {

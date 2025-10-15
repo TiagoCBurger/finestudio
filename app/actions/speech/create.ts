@@ -4,7 +4,7 @@ import { getSubscribedUser } from '@/lib/auth';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
 import { speechModels } from '@/lib/models/speech';
-import { trackCreditUsage } from '@/lib/stripe';
+// Stripe removido - sem rastreamento de créditos
 import { createClient } from '@/lib/supabase/server';
 import { projects } from '@/schema';
 import type { Edge, Node, Viewport } from '@xyflow/react';
@@ -30,11 +30,11 @@ export const generateSpeechAction = async ({
   voice,
 }: GenerateSpeechActionProps): Promise<
   | {
-      nodeData: object;
-    }
+    nodeData: object;
+  }
   | {
-      error: string;
-    }
+    error: string;
+  }
 > => {
   try {
     const client = await createClient();
@@ -56,10 +56,7 @@ export const generateSpeechAction = async ({
       voice,
     });
 
-    await trackCreditUsage({
-      action: 'generate_speech',
-      cost: provider.getCost(text.length),
-    });
+    // Rastreamento de créditos removido
 
     const blob = await client.storage
       .from('files')

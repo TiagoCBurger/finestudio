@@ -81,15 +81,18 @@ export const NodeLayout = ({
       return;
     }
 
-    const node = getNode(id);
+    // Defer the selection update to avoid render loop
+    setTimeout(() => {
+      const node = getNode(id);
 
-    if (!node) {
-      return;
-    }
+      if (!node) {
+        return;
+      }
 
-    if (!node.selected) {
-      updateNode(id, { selected: true });
-    }
+      if (!node.selected) {
+        updateNode(id, { selected: true });
+      }
+    }, 0);
   };
 
   return (

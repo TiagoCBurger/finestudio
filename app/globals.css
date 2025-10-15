@@ -71,7 +71,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.60 0.13 163);
+  --primary: oklch(0.60 0.20 300);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -105,7 +105,7 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.60 0.13 163);
+  --primary: oklch(0.60 0.20 300);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
@@ -197,6 +197,10 @@
   }
   .react-flow__node.selected .node-container {
     @apply ring-2! ring-[var(--cursor-color,var(--primary))]!;
+  }
+  .react-flow__node.selected .node-container:hover {
+    @apply backdrop-blur-sm bg-card/80!;
+    box-shadow: 0 8px 32px 0 rgba(139, 92, 246, 0.15);
   }
   .react-flow__controls-button {
     @apply inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-full;

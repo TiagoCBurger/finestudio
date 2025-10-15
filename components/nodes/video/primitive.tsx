@@ -68,10 +68,14 @@ export const VideoPrimitive = ({
       {!isUploading && data.content && (
         <video
           src={data.content.url}
-          className="h-auto w-full"
-          autoPlay
+          className="h-auto w-full cursor-pointer"
           muted
           loop
+          onMouseEnter={(e) => e.currentTarget.play()}
+          onMouseLeave={(e) => {
+            e.currentTarget.pause();
+            e.currentTarget.currentTime = 0;
+          }}
         />
       )}
       {!isUploading && !data.content && (

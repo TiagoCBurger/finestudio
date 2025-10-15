@@ -17,6 +17,10 @@ export const PostHogProvider = ({ children }: PostHogProviderProps) => {
       return;
     }
 
+    if (!env.NEXT_PUBLIC_POSTHOG_KEY) {
+      return;
+    }
+
     posthog.init(env.NEXT_PUBLIC_POSTHOG_KEY, {
       api_host: '/ingest',
       ui_host: 'https://us.posthog.com',

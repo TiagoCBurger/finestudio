@@ -1,11 +1,11 @@
 'use server';
 
 import { getSubscribedUser } from '@/lib/auth';
+import { withCreditCheck } from '@/lib/credits/middleware';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
 import { imageModels } from '@/lib/models/image';
 import { visionModels } from '@/lib/models/vision';
-import { trackCreditUsage } from '@/lib/stripe';
 import { createClient } from '@/lib/supabase/server';
 import { projects } from '@/schema';
 import type { Edge, Node, Viewport } from '@xyflow/react';
@@ -81,7 +81,8 @@ const generateGptImage1Image = async ({
 
 const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
 
-export const generateImageAction = async ({
+// Função interna (não exportada) - executa a geração real
+const _generateImageAction = async ({
   prompt,
   modelId,
   instructions,
@@ -90,11 +91,11 @@ export const generateImageAction = async ({
   size,
 }: GenerateImageActionProps): Promise<
   | {
-      nodeData: object;
-    }
+    nodeData: object;
+  }
   | {
-      error: string;
-    }
+    error: string;
+  }
 > => {
   try {
     const client = await createClient();
@@ -116,13 +117,7 @@ export const generateImageAction = async ({
         size,
       });
 
-      await trackCreditUsage({
-        action: 'generate_image',
-        cost: provider.getCost({
-          ...generatedImageResponse.usage,
-          size,
-        }),
-      });
+      // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
     } else {
@@ -148,12 +143,7 @@ export const generateImageAction = async ({
         aspectRatio,
       });
 
-      await trackCreditUsage({
-        action: 'generate_image',
-        cost: provider.getCost({
-          size,
-        }),
-      });
+      // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
     }
@@ -274,4 +264,30 @@ export const generateImageAction = async ({
 
     return { error: message };
   }
+};
+
+/**
+ * VERSÃO PROTEGIDA COM CRÉDITOS - Esta é a função que deve ser usada
+ * Automaticamente debita créditos baseado no modelo e parâmetros
+ */
+export const generateImageAction = withCreditCheck(
+  _generateImageAction,
+  // O modelId será extraído dos parâmetros dinamicamente
+  'dynamic', // Placeholder - será substituído no middleware
+  // Parâmetros de custo serão calculados dinamicamente
+);
+
+// Versão customizada que calcula custo baseado nos parâmetros reais
+export const generateImageActionWithCredits = async (params: GenerateImageActionProps) => {
+  // Criar versão protegida específica para este modelo e parâmetros
+  const protectedAction = withCreditCheck(
+    _generateImageAction,
+    params.modelId,
+    {
+      resolution: params.size,
+      quality: 'standard' // Pode ser extraído dos parâmetros se disponível
+    }
+  );
+
+  return await protectedAction(params);
 };

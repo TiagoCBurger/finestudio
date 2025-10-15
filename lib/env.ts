@@ -5,49 +5,41 @@ import { z } from 'zod';
 export const env = createEnv({
   extends: [vercel()],
   server: {
-    UPSTASH_REDIS_REST_URL: z.string().url().min(1),
-    UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
+    // Redis removido - sem rate limiting
+    // Resend opcional - apenas se quiser emails
+    RESEND_TOKEN: z.string().min(1).startsWith('re_').optional(),
+    RESEND_EMAIL: z.string().email().min(1).optional(),
 
-    RESEND_TOKEN: z.string().min(1).startsWith('re_'),
-    RESEND_EMAIL: z.string().email().min(1),
+    // Stripe removido - sem sistema de cobrança
 
-    STRIPE_SECRET_KEY: z.string().min(1).startsWith('sk_'),
-    STRIPE_HOBBY_PRODUCT_ID: z.string().min(1).startsWith('prod_'),
-    STRIPE_PRO_PRODUCT_ID: z.string().min(1).startsWith('prod_'),
-    STRIPE_USAGE_PRODUCT_ID: z.string().min(1).startsWith('prod_'),
-    STRIPE_CREDITS_METER_ID: z.string().min(1).startsWith('mtr_'),
-    STRIPE_CREDITS_METER_NAME: z.string().min(1),
-    STRIPE_WEBHOOK_SECRET: z.string().min(1).startsWith('whsec_'),
-
-    SUPABASE_AUTH_HOOK_SECRET: z.string().min(1).startsWith('v1,whsec_'),
-
-    // Supabase Integration
+    // Supabase Integration (Obrigatório)
     POSTGRES_URL: z.string().url().min(1),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+    SUPABASE_AUTH_HOOK_SECRET: z.string().min(1).optional(),
 
-    // AI SDK
-    OPENAI_API_KEY: z.string().min(1).startsWith('sk-'),
-    XAI_API_KEY: z.string().min(1).startsWith('xai-'),
-    AWS_ACCESS_KEY_ID: z.string().min(1),
-    AWS_SECRET_ACCESS_KEY: z.string().min(1),
-    AWS_REGION: z.string().min(1),
-    HUME_API_KEY: z.string().min(1),
-    LMNT_API_KEY: z.string().min(1),
+    // Fal.ai (Obrigatório)
+    FAL_API_KEY: z.string().min(1),
 
-    // Other Models
-    MINIMAX_GROUP_ID: z.string().min(1),
-    MINIMAX_API_KEY: z.string().min(1),
-    RUNWAYML_API_SECRET: z.string().min(1).startsWith('key_'),
-    LUMA_API_KEY: z.string().min(1).startsWith('luma-'),
-    BF_API_KEY: z.string().min(1),
-
-    // Vercel AI Gateway
-    AI_GATEWAY_API_KEY: z.string().min(1),
+    // Opcional - Outros providers de IA
+    OPENAI_API_KEY: z.string().min(1).startsWith('sk-').optional(),
+    OPENROUTER_API_KEY: z.string().min(1).optional(),
+    XAI_API_KEY: z.string().min(1).startsWith('xai-').optional(),
+    AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
+    AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+    AWS_REGION: z.string().min(1).optional(),
+    HUME_API_KEY: z.string().min(1).optional(),
+    LMNT_API_KEY: z.string().min(1).optional(),
+    MINIMAX_GROUP_ID: z.string().min(1).optional(),
+    MINIMAX_API_KEY: z.string().min(1).optional(),
+    RUNWAYML_API_SECRET: z.string().min(1).startsWith('key_').optional(),
+    LUMA_API_KEY: z.string().min(1).startsWith('luma-').optional(),
+    AI_GATEWAY_API_KEY: z.string().min(1).optional(),
   },
   client: {
-    NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1),
-    NEXT_PUBLIC_POSTHOG_KEY: z.string().min(1),
-    NEXT_PUBLIC_POSTHOG_HOST: z.string().url().min(1),
+    // Opcional - Analytics e Captcha
+    NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1).optional(),
+    NEXT_PUBLIC_POSTHOG_KEY: z.string().min(1).optional(),
+    NEXT_PUBLIC_POSTHOG_HOST: z.string().url().min(1).optional(),
 
     // Supabase Integration
     NEXT_PUBLIC_SUPABASE_URL: z.string().url().min(1),
@@ -55,6 +47,7 @@ export const env = createEnv({
   },
   runtimeEnv: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     XAI_API_KEY: process.env.XAI_API_KEY,
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
@@ -65,17 +58,10 @@ export const env = createEnv({
     NEXT_PUBLIC_TURNSTILE_SITE_KEY: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
     MINIMAX_GROUP_ID: process.env.MINIMAX_GROUP_ID,
     MINIMAX_API_KEY: process.env.MINIMAX_API_KEY,
-    UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
-    UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+    // Redis removido
     RESEND_TOKEN: process.env.RESEND_TOKEN,
     RESEND_EMAIL: process.env.RESEND_EMAIL,
-    STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
-    STRIPE_HOBBY_PRODUCT_ID: process.env.STRIPE_HOBBY_PRODUCT_ID,
-    STRIPE_PRO_PRODUCT_ID: process.env.STRIPE_PRO_PRODUCT_ID,
-    STRIPE_USAGE_PRODUCT_ID: process.env.STRIPE_USAGE_PRODUCT_ID,
-    STRIPE_CREDITS_METER_ID: process.env.STRIPE_CREDITS_METER_ID,
-    STRIPE_CREDITS_METER_NAME: process.env.STRIPE_CREDITS_METER_NAME,
-    STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+    // Stripe removido
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_AUTH_HOOK_SECRET: process.env.SUPABASE_AUTH_HOOK_SECRET,
     RUNWAYML_API_SECRET: process.env.RUNWAYML_API_SECRET,
@@ -84,7 +70,7 @@ export const env = createEnv({
     NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST,
     HUME_API_KEY: process.env.HUME_API_KEY,
     LMNT_API_KEY: process.env.LMNT_API_KEY,
-    BF_API_KEY: process.env.BF_API_KEY,
+    FAL_API_KEY: process.env.FAL_API_KEY,
     AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
   },
 });

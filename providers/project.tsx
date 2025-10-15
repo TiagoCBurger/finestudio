@@ -2,6 +2,7 @@
 
 import type { projects } from '@/schema';
 import { type ReactNode, createContext, useContext } from 'react';
+import { useProjectRealtime } from '@/hooks/use-project-realtime';
 
 type ProjectContextType = {
   project: typeof projects.$inferSelect | null;
@@ -27,8 +28,13 @@ export const ProjectProvider = ({
 }: {
   children: ReactNode;
   data: typeof projects.$inferSelect;
-}) => (
-  <ProjectContext.Provider value={{ project: data }}>
-    {children}
-  </ProjectContext.Provider>
-);
+}) => {
+  // Subscrever às mudanças do projeto via Realtime
+  useProjectRealtime(data.id);
+
+  return (
+    <ProjectContext.Provider value={{ project: data }}>
+      {children}
+    </ProjectContext.Provider>
+  );
+};

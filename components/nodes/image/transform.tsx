@@ -206,37 +206,14 @@ export const ImageTransform = ({
 
       if (falRequestId && falStatus === 'pending') {
         console.log('✅ Fal.ai job submitted, monitoring:', falRequestId);
-        console.log('🔄 Setting requestId state...');
         setRequestId(falRequestId);
-        console.log('✅ RequestId state set!');
         // NÃO atualizar o nó ainda, aguardar webhook
         // NÃO parar loading, manter até webhook completar
         toast.info('Image generation started, waiting for completion...');
-        console.log('⏳ Keeping loading state active, waiting for webhook...');
+        console.log('⏳ Keeping loading state active, waiting for webhook via Realtime...');
 
-        // Iniciar polling do projeto para detectar quando o webhook atualizar
-        const pollInterval = setInterval(async () => {
-          console.log('🔄 Polling project for updates...');
-          await mutate(`/api/projects/${project.id}`);
-        }, 2000); // Poll a cada 2 segundos
-
-        // Limpar interval quando o job completar (após 30 segundos no máximo)
-        let pollCount = 0;
-        const maxPolls = 15; // 30 segundos
-        const checkCompletion = setInterval(() => {
-          pollCount++;
-          if (!loading && !jobLoading) {
-            console.log('✅ Job completed, stopping polling');
-            clearInterval(pollInterval);
-            clearInterval(checkCompletion);
-          } else if (pollCount >= maxPolls) {
-            console.log('⏱️ Polling timeout, stopping');
-            clearInterval(pollInterval);
-            clearInterval(checkCompletion);
-            setLoading(false);
-            toast.error('Image generation timeout. Please refresh the page.');
-          }
-        }, 500);
+        // O Supabase Realtime vai notificar automaticamente quando o webhook atualizar o projeto
+        // Não precisa mais de polling manual!
       } else {
         // Modo síncrono (sem webhook) - atualizar imediatamente
         console.log('Updating node data directly (no webhook)');

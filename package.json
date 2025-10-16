@@ -22,7 +22,7 @@
     "@ai-sdk/openai": "^2.0.16",
     "@ai-sdk/provider": "^2.0.0",
     "@ai-sdk/react": "^2.0.17",
-    "@ai-sdk/xai": "^2.0.10",
+    "@ai-sdk/xai": "^2.0.26",
     "@aws-sdk/client-s3": "^3.911.0",
     "@aws-sdk/s3-request-presigner": "^3.911.0",
     "@fal-ai/client": "^1.6.2",

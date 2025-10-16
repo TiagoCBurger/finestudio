@@ -31,7 +31,12 @@ export function useProjectRealtime(projectId: string | undefined) {
                     console.log('🔴 Project updated via realtime:', payload);
 
                     // Revalidar o cache do SWR para atualizar o UI
-                    mutate(`/api/projects/${projectId}`);
+                    // Usar try-catch para evitar erros durante a revalidação
+                    try {
+                        mutate(`/api/projects/${projectId}`);
+                    } catch (error) {
+                        console.error('🔴 Error revalidating project:', error);
+                    }
                 }
             )
             .subscribe((status) => {

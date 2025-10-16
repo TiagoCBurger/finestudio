@@ -29,8 +29,8 @@ export const ProjectProvider = ({
   children: ReactNode;
   data: typeof projects.$inferSelect;
 }) => {
-  // Subscrever às mudanças do projeto via Realtime
-  useProjectRealtime(data.id);
+  // TODO: Habilitar Realtime após configurar no Supabase Dashboard
+  // useProjectRealtime(data.id);
 
   return (
     <ProjectContext.Provider value={{ project: data }}>

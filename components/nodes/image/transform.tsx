@@ -195,6 +195,14 @@ export const ImageTransform = ({
 
       // Verificar se há request_id nos headers (modo webhook)
       const nodeData = response.nodeData as any;
+
+      console.log('🔍 NodeData structure:', {
+        hasNodeData: !!nodeData,
+        hasGenerated: !!nodeData?.generated,
+        hasHeaders: !!nodeData?.generated?.headers,
+        nodeDataKeys: nodeData ? Object.keys(nodeData) : [],
+        generatedKeys: nodeData?.generated ? Object.keys(nodeData.generated) : [],
+      });
       const falRequestId = nodeData.generated?.headers?.['x-fal-request-id'];
       const falStatus = nodeData.generated?.headers?.['x-fal-status'];
 

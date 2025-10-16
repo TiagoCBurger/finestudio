@@ -2,7 +2,7 @@ import { getFalJobByRequestId } from '@/lib/fal-jobs';
 import { NextResponse } from 'next/server';
 
 export async function GET(
-    request: Request,
+    _request: Request,
     { params }: { params: Promise<{ requestId: string }> }
 ) {
     try {

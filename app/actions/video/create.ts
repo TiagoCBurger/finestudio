@@ -40,7 +40,7 @@ export const generateVideoAction = async ({
   }
 > => {
   try {
-    const user = await getSubscribedUser();
+    await getSubscribedUser(); // Verify user is authenticated
     const allModels = getAllVideoModelsServer();
     const model = allModels[modelId];
 
@@ -61,12 +61,31 @@ export const generateVideoAction = async ({
       firstFrameImage = `data:${images.at(0)?.type};base64,${base64}`;
     }
 
+    console.log('[Video Generation] Image prompt:', firstFrameImage ? 'Present' : 'None');
+
     const url = await provider.model.generate({
       prompt,
-      imagePrompt: firstFrameImage,
+      imagePrompt: firstFrameImage || undefined, // Garantir que seja undefined, não null
       duration: duration as 5,
       aspectRatio,
     });
+
+    // ✅ Check if this is a pending webhook job
+    if (typeof url === 'string' && url.startsWith('pending:')) {
+      const requestId = url.replace('pending:', '');
+
+      console.log('[Video Generation] Job submitted to webhook queue:', requestId);
+      console.log('[Video Generation] Returning pending status, frontend will poll for completion');
+
+      // Return pending status with request ID for frontend polling
+      return {
+        nodeData: {
+          status: 'pending',
+          requestId,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
 
     console.log('[Video Generation] Downloading video from:', url);
 

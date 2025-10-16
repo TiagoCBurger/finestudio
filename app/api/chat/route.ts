@@ -8,13 +8,13 @@ export const maxDuration = 30;
 // Convert messages to OpenRouter format
 function convertMessages(messages: any[]) {
   console.log('RAW MESSAGES RECEIVED:', JSON.stringify(messages, null, 2));
-  
+
   const converted = messages.map((msg, index) => {
     console.log(`Processing message ${index}:`, msg);
-    
+
     // Extract text from various possible formats
     let textContent = '';
-    
+
     // Try different text fields
     if (msg.text) textContent = msg.text;
     else if (msg.content) textContent = msg.content;
@@ -23,16 +23,16 @@ function convertMessages(messages: any[]) {
       const textPart = msg.parts.find((p: any) => p.type === 'text');
       if (textPart) textContent = textPart.text || '';
     }
-    
+
     console.log(`Extracted text for message ${index}:`, textContent);
-    
+
     const content: any[] = [];
-    
+
     // Add text content if available
     if (textContent && textContent.trim()) {
       content.push({ type: 'text', text: textContent.trim() });
     }
-    
+
     // Handle file attachments (images)
     if (msg.files && Array.isArray(msg.files)) {
       for (const file of msg.files) {
@@ -44,7 +44,7 @@ function convertMessages(messages: any[]) {
         }
       }
     }
-    
+
     // Build final message
     let finalContent;
     if (content.length === 1 && content[0].type === 'text') {
@@ -56,28 +56,28 @@ function convertMessages(messages: any[]) {
     } else {
       finalContent = '';
     }
-    
+
     const result = {
       role: msg.role || 'user',
       content: finalContent
     };
-    
+
     console.log(`Converted message ${index}:`, JSON.stringify(result, null, 2));
     return result;
   }).filter(msg => {
-    const hasContent = msg.content && 
-      (typeof msg.content === 'string' ? msg.content.trim().length > 0 : 
-       Array.isArray(msg.content) ? msg.content.length > 0 : false);
+    const hasContent = msg.content &&
+      (typeof msg.content === 'string' ? msg.content.trim().length > 0 :
+        Array.isArray(msg.content) ? msg.content.length > 0 : false);
     console.log('Message has content?', hasContent, msg);
     return hasContent;
   });
-  
+
   console.log('FINAL CONVERTED MESSAGES:', JSON.stringify(converted, null, 2));
-  
+
   if (converted.length === 0) {
     throw new Error(`No valid messages with content found. Original messages: ${JSON.stringify(messages)}`);
   }
-  
+
   return converted;
 }
 
@@ -105,27 +105,27 @@ async function streamOpenRouterResponse(modelId: string, messages: any[]) {
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  
+
   // Create a TransformStream to convert OpenRouter SSE to Vercel AI SDK format
   const stream = new TransformStream({
     async transform(chunk, controller) {
       const text = decoder.decode(chunk);
       const lines = text.split('\n').filter(line => line.trim() !== '');
-      
+
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          
+
           if (data === '[DONE]') {
             // Send completion event
             controller.enqueue(encoder.encode(`0:{"finishReason":"stop","usage":{"promptTokens":0,"completionTokens":0}}\n`));
             continue;
           }
-          
+
           try {
             const parsed = JSON.parse(data);
             const delta = parsed.choices?.[0]?.delta;
-            
+
             if (delta?.content) {
               // Send text delta in Vercel AI SDK format
               controller.enqueue(encoder.encode(`0:{"textDelta":"${delta.content.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"}\n`));
@@ -139,7 +139,7 @@ async function streamOpenRouterResponse(modelId: string, messages: any[]) {
   });
 
   response.body?.pipeThrough(stream);
-  
+
   return new Response(stream.readable, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
@@ -149,15 +149,22 @@ async function streamOpenRouterResponse(modelId: string, messages: any[]) {
 }
 
 export const POST = async (req: Request) => {
+  console.log('🔵 Chat API - Request received');
+
   try {
-    await getSubscribedUser();
+    const user = await getSubscribedUser();
+    console.log('✅ User authenticated:', user.id);
   } catch (error) {
+    console.error('❌ Authentication failed:', error);
     const message = parseError(error);
     return new Response(message, { status: 401 });
   }
 
   try {
-    const { messages, modelId } = await req.json();
+    const body = await req.json();
+    console.log('📦 Request body:', JSON.stringify(body, null, 2));
+
+    const { messages, modelId } = body;
 
     console.log('Received request body:', { messages, modelId });
 
@@ -170,24 +177,43 @@ export const POST = async (req: Request) => {
     }
 
     const textModelConfig = textModels[modelId];
+    console.log('📋 Model config:', textModelConfig ? 'Found' : 'Not found', modelId);
 
     // OpenRouter - Direct API call (NO Vercel AI SDK)
     if (textModelConfig && textModelConfig.provider === 'openrouter') {
+      console.log('✅ Model config found:', textModelConfig);
+
       if (!env.OPENROUTER_API_KEY) {
+        console.error('❌ OPENROUTER_API_KEY not configured');
         return new Response('OpenRouter not configured', { status: 503 });
       }
 
-      console.log('API - Using OpenRouter DIRECT API (no SDK) for:', modelId);
-      return await streamOpenRouterResponse(modelId, messages);
+      console.log('✅ OPENROUTER_API_KEY is configured');
+      console.log('🚀 Using OpenRouter DIRECT API for:', modelId);
+
+      try {
+        const response = await streamOpenRouterResponse(modelId, messages);
+        console.log('✅ OpenRouter response received');
+        return response;
+      } catch (streamError) {
+        console.error('❌ Error in streamOpenRouterResponse:', streamError);
+        throw streamError;
+      }
     }
 
+    console.error('❌ Model not supported:', modelId);
     return new Response('Model not supported', { status: 400 });
   } catch (error) {
-    console.error('Error in chat API:', error);
-    return new Response(JSON.stringify({ 
+    console.error('❌ Error in chat API:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
+    console.error('Error type:', typeof error);
+    console.error('Error details:', error);
+
+    return new Response(JSON.stringify({
       error: parseError(error),
-      details: error instanceof Error ? error.message : String(error)
-    }), { 
+      details: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     });

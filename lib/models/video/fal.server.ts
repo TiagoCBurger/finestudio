@@ -2,12 +2,19 @@ import { fal as falClient } from '@fal-ai/client';
 import { env } from '@/lib/env';
 import type { VideoModel } from '@/lib/models/video';
 import { currentUser } from '@/lib/auth';
-import { createFalJob, waitForFalJob } from '@/lib/fal-jobs';
+import { createFalJob } from '@/lib/fal-jobs';
 
 type FalVideoModel =
     | 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video'
     | 'fal-ai/kling-video/v2.5-turbo/pro/text-to-video'
-    | 'fal-ai/sora-2/image-to-video/pro';
+    | 'fal-ai/sora-2/image-to-video/pro'
+    | 'fal-ai/wan-25-preview/text-to-video';
+
+export type VideoGenerationResult = {
+    url: string;
+    requestId?: string;
+    isPending?: boolean;
+};
 
 export const falServer = (
     imageToVideoModelId: FalVideoModel,
@@ -17,11 +24,9 @@ export const falServer = (
     textToVideoModelId,
     generate: async ({ prompt, imagePrompt, duration, aspectRatio }) => {
         // Escolher o endpoint correto baseado na presença de imagem
-        const modelId = imagePrompt && textToVideoModelId
-            ? imageToVideoModelId
-            : !imagePrompt && textToVideoModelId
-                ? textToVideoModelId
-                : imageToVideoModelId;
+        const modelId = imagePrompt
+            ? imageToVideoModelId  // Se tem imagem, usa image-to-video
+            : textToVideoModelId || imageToVideoModelId;  // Se não tem imagem, usa text-to-video (se disponível)
 
         // Validação: se não tem textToVideoModelId, imagem é obrigatória
         if (!imagePrompt && !textToVideoModelId) {
@@ -52,17 +57,23 @@ export const falServer = (
             aspect_ratio: aspectRatio, // "16:9", "9:16", "1:1"
         };
 
-        // Adicionar image_url apenas se houver imagem
-        if (imagePrompt) {
+        // Adicionar image_url apenas se houver imagem válida
+        // IMPORTANTE: Não enviar null ou undefined, apenas omitir o campo
+        if (imagePrompt && typeof imagePrompt === 'string' && imagePrompt.trim() !== '') {
             input.image_url = imagePrompt;
+            console.log('✅ Image URL added to input:', imagePrompt.substring(0, 50) + '...');
+        } else {
+            console.log('ℹ️ No image URL provided, using text-to-video mode');
         }
 
-        console.log('Fal.ai video queue request:', {
+        console.log('🎬 Fal.ai video queue request:', {
             modelId,
             hasImage: !!imagePrompt,
             requestedDuration: duration,
             adjustedDuration,
             aspectRatio,
+            inputKeys: Object.keys(input),
+            fullInput: JSON.stringify(input, null, 2),
         });
 
         // Configure credentials (must be done here to avoid client-side access)
@@ -94,42 +105,43 @@ export const falServer = (
         let result: { video: { url: string } };
 
         if (useWebhook) {
-            // Modo webhook: salvar job e aguardar via polling no banco
+            // Modo webhook: salvar job e retornar imediatamente
             const user = await currentUser();
             if (!user) {
                 throw new Error('User not authenticated');
             }
+
+            // Extrair metadados do input se disponíveis
+            const nodeId = (input as any)._metadata?.nodeId;
+            const projectId = (input as any)._metadata?.projectId;
 
             await createFalJob({
                 requestId: request_id,
                 userId: user.id,
                 modelId,
                 type: 'video',
-                input,
+                input: {
+                    ...input,
+                    _metadata: {
+                        nodeId,
+                        projectId,
+                    },
+                },
             });
 
-            console.log('Video job saved, waiting for webhook...');
+            console.log('✅ Video job saved, returning immediately (webhook will update)');
+            console.log('⏱️ Expected completion time:', modelId.includes('sora') ? '4-6 minutes' : '2-3 minutes');
 
-            // Sora 2 pode levar até 6 minutos, Kling é mais rápido (3 minutos)
-            const maxWaitTime = modelId.includes('sora')
-                ? 6 * 60 * 1000
-                : 3 * 60 * 1000;
-
-            const job = await waitForFalJob(request_id, {
-                maxWaitTime,
-                pollInterval: 3000, // 3 segundos para vídeos
-            });
-
-            result = job.result as { video: { url: string } };
+            // ✅ Retornar URL temporária que indica "processando"
+            // O webhook atualizará o banco quando completar
+            // O frontend fará polling via /api/fal-jobs/[requestId]
+            return `pending:${request_id}`;
         } else {
             // ⚠️ MODO FALLBACK (apenas desenvolvimento sem webhook)
             // Este modo bloqueia a requisição até completar (pode levar minutos)
             // Use apenas quando NEXT_PUBLIC_APP_URL não estiver configurado
             console.log('⚠️ Using fallback polling mode for video (dev only, slower)');
-
-            const timeoutMs = modelId.includes('sora')
-                ? 6 * 60 * 1000
-                : 3 * 60 * 1000;
+            console.log('⏱️ Expected wait time:', modelId.includes('sora') ? '4-6 minutes' : '2-3 minutes');
 
             result = (await falClient.queue.result(modelId, {
                 requestId: request_id,

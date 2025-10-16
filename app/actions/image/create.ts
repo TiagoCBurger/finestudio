@@ -43,7 +43,7 @@ const _generateImageAction = async ({
   }
 > => {
   try {
-    const user = await getSubscribedUser();
+    await getSubscribedUser(); // Verify user is authenticated
     const model = imageModelsServer[modelId];
 
     if (!model) {
@@ -153,11 +153,6 @@ const _generateImageAction = async ({
 
     // Use the storage abstraction layer
     const uploadResult = await uploadFile(file, 'files', name);
-
-    const url =
-      process.env.NODE_ENV === 'production'
-        ? uploadResult.url
-        : `data:${image.mediaType};base64,${Buffer.from(image.uint8Array).toString('base64')}`;
 
     const project = await database.query.projects.findFirst({
       where: eq(projects.id, projectId),

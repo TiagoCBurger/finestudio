@@ -60,7 +60,6 @@ export const ImageTransform = ({
   const [localInstructions, setLocalInstructions] = useState(
     data.instructions ?? ''
   );
-  const [requestId, setRequestId] = useState<string | null>(null);
 
   const project = useProject();
 
@@ -151,7 +150,6 @@ export const ImageTransform = ({
 
       if (falRequestId && falStatus === 'pending') {
         console.log('✅ Fal.ai job submitted, monitoring:', falRequestId);
-        setRequestId(falRequestId);
         // NÃO atualizar o nó ainda, aguardar webhook
         // NÃO parar loading, manter até webhook completar
         toast.info('Image generation started, waiting for completion...');
@@ -188,7 +186,6 @@ export const ImageTransform = ({
 
       handleError('Error generating image', error);
       setLoading(false);
-      setRequestId(null);
     }
     // NÃO usar finally para não parar loading no modo webhook
   }, [

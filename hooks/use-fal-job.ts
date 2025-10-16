@@ -1,74 +1,126 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-export interface FalJobStatus {
+export type FalJobStatus = 'pending' | 'completed' | 'failed';
+
+export interface FalJob {
     id: string;
     requestId: string;
-    status: 'pending' | 'completed' | 'failed';
-    result?: any;
-    error?: string;
+    status: FalJobStatus;
+    result: unknown;
+    error: string | null;
     createdAt: string;
-    completedAt?: string;
+    completedAt: string | null;
 }
 
-export function useFalJob(requestId: string | null) {
-    const [job, setJob] = useState<FalJobStatus | null>(null);
-    const [loading, setLoading] = useState(false);
+interface UseFalJobOptions {
+    requestId: string | null;
+    enabled?: boolean;
+    pollInterval?: number;
+    maxPollTime?: number;
+    onCompleted?: (job: FalJob) => void;
+    onFailed?: (error: string) => void;
+}
+
+export function useFalJob({
+    requestId,
+    enabled = true,
+    pollInterval = 3000, // 3 seconds
+    maxPollTime = 10 * 60 * 1000, // 10 minutes
+    onCompleted,
+    onFailed,
+}: UseFalJobOptions) {
+    const [job, setJob] = useState<FalJob | null>(null);
+    const [isPolling, setIsPolling] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const startTimeRef = useRef<number>(0);
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
-        if (!requestId) return;
+        if (!requestId || !enabled) {
+            return;
+        }
 
-        let intervalId: NodeJS.Timeout;
-        let mounted = true;
+        let isMounted = true;
+        startTimeRef.current = Date.now();
+        setIsPolling(true);
+        setError(null);
 
         const pollJobStatus = async () => {
             try {
-                setLoading(true);
+                // Check if we've exceeded max poll time
+                const elapsed = Date.now() - startTimeRef.current;
+                if (elapsed > maxPollTime) {
+                    const timeoutError = `Job polling timed out after ${maxPollTime / 1000} seconds`;
+                    setError(timeoutError);
+                    setIsPolling(false);
+                    onFailed?.(timeoutError);
+                    return;
+                }
+
                 const response = await fetch(`/api/fal-jobs/${requestId}`);
 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                    if (response.status === 404) {
+                        throw new Error('Job not found');
+                    }
+                    throw new Error(`Failed to fetch job status: ${response.status}`);
                 }
 
-                const jobData = await response.json();
+                const jobData: FalJob = await response.json();
 
-                console.log('Polling job status:', {
+                if (!isMounted) return;
+
+                setJob(jobData);
+
+                console.log('[useFalJob] Job status:', {
                     requestId,
                     status: jobData.status,
                     hasResult: !!jobData.result,
-                    resultPreview: jobData.result ? JSON.stringify(jobData.result).substring(0, 100) : null,
+                    elapsed: `${Math.round(elapsed / 1000)}s`,
                 });
 
-                if (mounted) {
-                    setJob(jobData);
-                    setError(null);
-
-                    // Parar polling se job completou ou falhou
-                    if (jobData.status === 'completed' || jobData.status === 'failed') {
-                        console.log('Job finished, stopping polling:', jobData.status);
-                        clearInterval(intervalId);
-                        setLoading(false);
-                    }
+                if (jobData.status === 'completed') {
+                    setIsPolling(false);
+                    onCompleted?.(jobData);
+                    console.log('[useFalJob] Job completed successfully');
+                } else if (jobData.status === 'failed') {
+                    const failError = jobData.error || 'Job failed';
+                    setError(failError);
+                    setIsPolling(false);
+                    onFailed?.(failError);
+                    console.error('[useFalJob] Job failed:', failError);
+                } else {
+                    // Still pending, schedule next poll
+                    timeoutRef.current = setTimeout(pollJobStatus, pollInterval);
                 }
             } catch (err) {
-                if (mounted) {
-                    setError(err instanceof Error ? err.message : 'Unknown error');
-                    setLoading(false);
-                }
+                if (!isMounted) return;
+
+                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+                console.error('[useFalJob] Polling error:', errorMessage);
+                setError(errorMessage);
+                setIsPolling(false);
+                onFailed?.(errorMessage);
             }
         };
 
-        // Fazer polling a cada 2 segundos
-        intervalId = setInterval(pollJobStatus, 2000);
-
-        // Fazer primeira verificação imediatamente
+        // Start polling
         pollJobStatus();
 
         return () => {
-            mounted = false;
-            clearInterval(intervalId);
+            isMounted = false;
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
+            }
         };
-    }, [requestId]);
+    }, [requestId, enabled, pollInterval, maxPollTime, onCompleted, onFailed]);
 
-    return { job, loading, error };
+    return {
+        job,
+        isPolling,
+        error,
+        isCompleted: job?.status === 'completed',
+        isFailed: job?.status === 'failed',
+        isPending: job?.status === 'pending',
+    };
 }

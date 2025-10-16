@@ -2,7 +2,7 @@ import { fal } from '@fal-ai/client';
 import { env } from '@/lib/env';
 import type { ImageModel, ImageModelCallWarning } from 'ai';
 import { currentUser } from '@/lib/auth';
-import { createFalJob, waitForFalJob } from '@/lib/fal-jobs';
+import { createFalJob } from '@/lib/fal-jobs';
 import { database } from '@/lib/database';
 import { falJobs } from '@/schema';
 import { eq } from 'drizzle-orm';
@@ -169,7 +169,7 @@ export const falAIServer = {
                 }
 
                 // Gerar um request_id temporário para salvar o job primeiro
-                const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
                 console.log('Pre-creating job to avoid race condition...');
 

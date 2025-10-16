@@ -68,6 +68,25 @@ export const videoModels: Record<string, TersaVideoModel> = {
     aspectRatios: ['16:9', '9:16', '1:1'],
     enabled: true,
   },
+  'fal-wan-25-preview': {
+    label: 'WAN-25 Preview (Text-to-Video)',
+    chef: providers.fal,
+    providers: [
+      {
+        ...providers.fal,
+        model: fal('fal-ai/wan-25-preview/text-to-video', undefined),
+
+        // https://fal.ai/models/wan-25-preview - Pricing TBD (preview model)
+        getCost: ({ duration }) => {
+          // Assuming similar pricing to other text-to-video models
+          return duration <= 5 ? 0.5 : 1.0;
+        },
+      },
+    ],
+    durations: [5, 10],
+    aspectRatios: ['16:9', '9:16', '1:1'],
+    enabled: true,
+  },
 };
 
 /**

@@ -29,6 +29,17 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'fal.media',
       },
+
+      // Cloudflare R2 storage - signed URLs with path-style (works without public access)
+      {
+        protocol: 'https',
+        hostname: '53e47c76330e4238bb188ab59c62bf82.r2.cloudflarestorage.com',
+      },
+      // Cloudflare R2 storage - public endpoint (if enabled)
+      {
+        protocol: 'https',
+        hostname: 'pub-53e47c76330e4238bb188ab59c62bf82.r2.dev',
+      },
     ],
   },
 

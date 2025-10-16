@@ -75,6 +75,9 @@ export const falAIServer = {
                 } else if (typeof providerOptions?.fal?.image === 'string') {
                     input.image_urls = [providerOptions.fal.image]; // Single image
                     input.strength = 0.75;
+                } else {
+                    // Nano Banana REQUIRES images
+                    throw new Error('Nano Banana model requires at least one image. Please connect an image node to this node.');
                 }
             } else if (isGptImageEdit) {
                 // GPT Image Edit requires image_urls array and OpenAI API key
@@ -83,6 +86,9 @@ export const falAIServer = {
                     input.image_urls = images;
                 } else if (typeof providerOptions?.fal?.image === 'string') {
                     input.image_urls = [providerOptions.fal.image];
+                } else {
+                    // GPT Image Edit REQUIRES images
+                    throw new Error('GPT Image Edit model requires at least one image. Please connect an image node to this node.');
                 }
 
                 // OpenAI API key is required for BYOK model
@@ -121,7 +127,7 @@ export const falAIServer = {
                 input.seed = seed;
             }
 
-            console.log('Fal.ai queue request:', {
+            console.log('🔍 Fal.ai queue request:', {
                 modelId,
                 isNanoBanana: modelId === 'fal-ai/nano-banana/edit',
                 isGptImageEdit: modelId === 'fal-ai/gpt-image-1/edit-image/byok',
@@ -129,7 +135,8 @@ export const falAIServer = {
                 hasImageUrl: !!input.image_url,
                 hasImageUrls: !!input.image_urls,
                 hasOpenAIKey: !!input.openai_api_key,
-                input
+                inputKeys: Object.keys(input),
+                fullInput: JSON.stringify(input, null, 2),
             });
 
             // Configure credentials (must be done here to avoid client-side access)

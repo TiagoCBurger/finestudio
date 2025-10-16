@@ -7,6 +7,11 @@ import type { TweetNodeProps } from '@/components/nodes/tweet';
 import type { Node } from '@xyflow/react';
 
 export const getTextFromTextNodes = (nodes: Node[]) => {
+  if (!Array.isArray(nodes)) {
+    console.error('getTextFromTextNodes: nodes is not an array', nodes);
+    return [];
+  }
+
   const sourceTexts = nodes
     .filter((node) => node.type === 'text')
     .map((node) => (node.data as TextNodeProps['data']).text);
@@ -19,6 +24,11 @@ export const getTextFromTextNodes = (nodes: Node[]) => {
 };
 
 export const getTranscriptionFromAudioNodes = (nodes: Node[]) => {
+  if (!Array.isArray(nodes)) {
+    console.error('getTranscriptionFromAudioNodes: nodes is not an array', nodes);
+    return [];
+  }
+
   const transcripts = nodes
     .filter((node) => node.type === 'audio')
     .map((node) => (node.data as AudioNodeProps['data']).transcript)
@@ -28,6 +38,11 @@ export const getTranscriptionFromAudioNodes = (nodes: Node[]) => {
 };
 
 export const getDescriptionsFromImageNodes = (nodes: Node[]) => {
+  if (!Array.isArray(nodes)) {
+    console.error('getDescriptionsFromImageNodes: nodes is not an array', nodes);
+    return [];
+  }
+
   const descriptions = nodes
     .filter((node) => node.type === 'image')
     .map((node) => (node.data as ImageNodeProps['data']).description)
@@ -37,6 +52,11 @@ export const getDescriptionsFromImageNodes = (nodes: Node[]) => {
 };
 
 export const getImagesFromImageNodes = (nodes: Node[]) => {
+  if (!Array.isArray(nodes)) {
+    console.error('getImagesFromImageNodes: nodes is not an array', nodes);
+    return [];
+  }
+
   const sourceImages = nodes
     .filter((node) => node.type === 'image')
     .map((node) => (node.data as ImageNodeProps['data']).content)
@@ -67,6 +87,11 @@ export const isValidSourceTarget = (source: Node, target: Node) => {
 };
 
 export const getCodeFromCodeNodes = (nodes: Node[]) => {
+  if (!Array.isArray(nodes)) {
+    console.error('getCodeFromCodeNodes: nodes is not an array', nodes);
+    return [];
+  }
+
   const sourceCodes = nodes
     .filter((node) => node.type === 'code')
     .map((node) => (node.data as CodeNodeProps['data']).content)
@@ -81,6 +106,11 @@ export const getCodeFromCodeNodes = (nodes: Node[]) => {
 };
 
 export const getFilesFromFileNodes = (nodes: Node[]) => {
+  if (!Array.isArray(nodes)) {
+    console.error('getFilesFromFileNodes: nodes is not an array', nodes);
+    return [];
+  }
+
   const files = nodes
     .filter((node) => node.type === 'file')
     .map((node) => (node.data as FileNodeProps['data']).content)
@@ -90,6 +120,11 @@ export const getFilesFromFileNodes = (nodes: Node[]) => {
 };
 
 export const getTweetContentFromTweetNodes = (nodes: Node[]) => {
+  if (!Array.isArray(nodes)) {
+    console.error('getTweetContentFromTweetNodes: nodes is not an array', nodes);
+    return [];
+  }
+
   const tweets = nodes
     .filter((node) => node.type === 'tweet')
     .map((node) => (node.data as TweetNodeProps['data']).content)

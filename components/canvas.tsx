@@ -33,7 +33,7 @@ import type { MouseEvent, MouseEventHandler, ClipboardEvent } from 'react';
 import { useCallback, useState, useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useDebouncedCallback } from 'use-debounce';
-import { uploadFile } from '@/lib/upload';
+import { uploadFile } from '@/lib/upload.client';
 import { ConnectionLine } from './connection-line';
 import { edgeTypes } from './edges';
 import { nodeTypes } from './nodes';
@@ -351,10 +351,10 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        
+
         if (item.type.indexOf('image') !== -1) {
           event.preventDefault();
-          
+
           const file = item.getAsFile();
           if (!file) {
             continue;

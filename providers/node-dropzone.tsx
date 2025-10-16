@@ -1,6 +1,6 @@
 'use client';
 
-import { uploadFile } from '@/lib/upload';
+import { uploadFile } from '@/lib/upload.client';
 import { cn } from '@/lib/utils';
 import { useReactFlow } from '@xyflow/react';
 import { FileIcon, ImageIcon, VideoIcon } from 'lucide-react';

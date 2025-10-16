@@ -4,8 +4,7 @@ import { getSubscribedUser } from '@/lib/auth';
 import { database } from '@/lib/database';
 import { parseError } from '@/lib/error/parse';
 import { getAllVideoModelsServer } from '@/lib/models/video/index.server';
-// Stripe removido - sem rastreamento de créditos
-import { createClient } from '@/lib/supabase/server';
+import { uploadFile } from '@/lib/upload.server';
 import { projects } from '@/schema';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import { eq } from 'drizzle-orm';
@@ -41,7 +40,6 @@ export const generateVideoAction = async ({
   }
 > => {
   try {
-    const client = await createClient();
     const user = await getSubscribedUser();
     const allModels = getAllVideoModelsServer();
     const model = allModels[modelId];
@@ -70,24 +68,32 @@ export const generateVideoAction = async ({
       aspectRatio,
     });
 
+    console.log('[Video Generation] Downloading video from:', url);
+
     const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Failed to download video: ${response.status} ${response.statusText}`);
+    }
+
+    console.log('[Video Generation] Video downloaded successfully, size:', response.headers.get('content-length'));
+
     const arrayBuffer = await response.arrayBuffer();
+    console.log('[Video Generation] ArrayBuffer size:', arrayBuffer.byteLength);
 
     // Rastreamento de créditos removido
 
-    const blob = await client.storage
-      .from('files')
-      .upload(`${user.id}/${nanoid()}.mp4`, arrayBuffer, {
-        contentType: 'video/mp4',
-      });
+    // Create a File object from the video data
+    const videoFile = new File([arrayBuffer], `${nanoid()}.mp4`, {
+      type: 'video/mp4',
+    });
 
-    if (blob.error) {
-      throw new Error(blob.error.message);
-    }
+    console.log('[Video Generation] Uploading video to storage...');
 
-    const { data: supabaseDownloadUrl } = client.storage
-      .from('files')
-      .getPublicUrl(blob.data.path);
+    // Use the storage abstraction layer
+    const uploadResult = await uploadFile(videoFile, 'files');
+
+    console.log('[Video Generation] Video uploaded successfully:', uploadResult.url);
 
     const project = await database.query.projects.findFirst({
       where: eq(projects.id, projectId),
@@ -103,6 +109,10 @@ export const generateVideoAction = async ({
       viewport: Viewport;
     };
 
+    if (!content || !Array.isArray(content.nodes)) {
+      throw new Error('Invalid project content structure');
+    }
+
     const existingNode = content.nodes.find((n) => n.id === nodeId);
 
     if (!existingNode) {
@@ -113,7 +123,7 @@ export const generateVideoAction = async ({
       ...(existingNode.data ?? {}),
       updatedAt: new Date().toISOString(),
       generated: {
-        url: supabaseDownloadUrl.publicUrl,
+        url: uploadResult.url,
         type: 'video/mp4',
       },
     };

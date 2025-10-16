@@ -1,14 +1,14 @@
-import { env } from '@/lib/env';
 import { parseError } from '@/lib/error/parse';
 import { database } from '@/lib/database';
 import { falJobs } from '@/schema';
 import { eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
+import { getStorageProvider } from '@/lib/storage/factory';
 
 type FalWebhookPayload = {
     request_id: string;
-    status: 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'OK';
+    status: 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'OK' | 'ERROR';
     response_url?: string;
     error?: string;
     logs?: Array<{ message: string; level: string; timestamp: string }>;
@@ -31,6 +31,22 @@ export const POST = async (req: Request) => {
             errorDetail: (payload as any).payload?.detail, // Ver detalhes do erro 422
             full_payload: payload, // Debug: ver payload completo
         });
+
+        // Log detalhado do erro 422
+        if (payload.status === 'ERROR' && payload.error?.includes('422')) {
+            const detail = (payload as any).payload?.detail;
+            console.log('🔴 Erro 422 - Detalhes completos:', JSON.stringify(detail, null, 2));
+            if (Array.isArray(detail)) {
+                detail.forEach((err, idx) => {
+                    console.log(`  Erro ${idx + 1}:`, {
+                        field: err.loc?.join('.'),
+                        message: err.msg,
+                        type: err.type,
+                        input: err.input,
+                    });
+                });
+            }
+        }
 
         // Buscar o job no banco de dados
         const [job] = await database
@@ -102,22 +118,12 @@ export const POST = async (req: Request) => {
                 });
             }
 
-            // Fazer upload para Supabase Storage (imagens e vídeos)
-            // Usar createClient do supabase-js diretamente com service role key
-            const { createClient: createSupabaseClient } = await import('@supabase/supabase-js');
-            const client = createSupabaseClient(
-                process.env.NEXT_PUBLIC_SUPABASE_URL!,
-                process.env.SUPABASE_SERVICE_ROLE_KEY!, // Service role bypassa RLS
-                {
-                    auth: {
-                        autoRefreshToken: false,
-                        persistSession: false,
-                    },
-                }
-            );
+            // Fazer upload para storage (imagens e vídeos)
+            // Usar a abstração de storage que suporta R2 e Supabase
+            const storage = getStorageProvider();
 
             if (job.type === 'image' && result.images?.[0]?.url) {
-                console.log('Uploading image to Supabase Storage...');
+                console.log(`Uploading image to storage (${process.env.STORAGE_PROVIDER || 'r2'})...`);
 
                 try {
                     const imageUrl = result.images[0].url;
@@ -130,41 +136,36 @@ export const POST = async (req: Request) => {
                         throw new Error(`Failed to fetch image: ${imageResponse.status}`);
                     }
 
-                    // Obter como Blob (melhor para upload)
-                    const imageBlob = await imageResponse.blob();
-                    console.log('Image downloaded, size:', imageBlob.size, 'bytes');
+                    // Obter como Buffer
+                    const imageArrayBuffer = await imageResponse.arrayBuffer();
+                    const imageBuffer = Buffer.from(imageArrayBuffer);
+                    console.log('Image downloaded, size:', imageBuffer.length, 'bytes');
 
-                    // Upload para Supabase
-                    const fileName = `${job.userId}/${nanoid()}.png`;
-                    console.log('Uploading to Supabase:', fileName);
+                    // Upload usando a abstração de storage
+                    const fileName = `${nanoid()}.png`;
+                    console.log('Uploading to storage:', fileName);
 
-                    const { data: uploadData, error: uploadError } = await client.storage
-                        .from('files')
-                        .upload(fileName, imageBlob, {
+                    const uploadResult = await storage.upload(
+                        job.userId,
+                        'files',
+                        fileName,
+                        imageBuffer,
+                        {
                             contentType: 'image/png',
                             upsert: false,
-                        });
+                        }
+                    );
 
-                    if (uploadError) {
-                        console.error('Upload error:', uploadError);
-                        throw uploadError;
-                    }
+                    // Atualizar resultado com URL permanente
+                    result.images[0].url = uploadResult.url;
 
-                    // Obter URL pública
-                    const { data: publicUrlData } = client.storage
-                        .from('files')
-                        .getPublicUrl(uploadData.path);
-
-                    // Atualizar resultado com URL do Supabase
-                    result.images[0].url = publicUrlData.publicUrl;
-
-                    console.log('Image uploaded to Supabase:', publicUrlData.publicUrl);
+                    console.log('Image uploaded to storage:', uploadResult.url);
                 } catch (uploadError) {
-                    console.error('Failed to upload image to Supabase:', uploadError);
+                    console.error('Failed to upload image to storage:', uploadError);
                     // Continuar mesmo se upload falhar (usar URL temporária do fal.ai)
                 }
             } else if (job.type === 'video' && result.video?.url) {
-                console.log('Uploading video to Supabase Storage...');
+                console.log(`Uploading video to storage (${process.env.STORAGE_PROVIDER || 'r2'})...`);
 
                 try {
                     const videoUrl = result.video.url;
@@ -177,37 +178,32 @@ export const POST = async (req: Request) => {
                         throw new Error(`Failed to fetch video: ${videoResponse.status}`);
                     }
 
-                    // Obter como Blob (melhor para upload)
-                    const videoBlob = await videoResponse.blob();
-                    console.log('Video downloaded, size:', videoBlob.size, 'bytes');
+                    // Obter como Buffer
+                    const videoArrayBuffer = await videoResponse.arrayBuffer();
+                    const videoBuffer = Buffer.from(videoArrayBuffer);
+                    console.log('Video downloaded, size:', videoBuffer.length, 'bytes');
 
-                    // Upload para Supabase
-                    const fileName = `${job.userId}/${nanoid()}.mp4`;
-                    console.log('Uploading to Supabase:', fileName);
+                    // Upload usando a abstração de storage
+                    const fileName = `${nanoid()}.mp4`;
+                    console.log('Uploading to storage:', fileName);
 
-                    const { data: uploadData, error: uploadError } = await client.storage
-                        .from('files')
-                        .upload(fileName, videoBlob, {
+                    const uploadResult = await storage.upload(
+                        job.userId,
+                        'files',
+                        fileName,
+                        videoBuffer,
+                        {
                             contentType: 'video/mp4',
                             upsert: false,
-                        });
+                        }
+                    );
 
-                    if (uploadError) {
-                        console.error('Upload error:', uploadError);
-                        throw uploadError;
-                    }
+                    // Atualizar resultado com URL permanente
+                    result.video.url = uploadResult.url;
 
-                    // Obter URL pública
-                    const { data: publicUrlData } = client.storage
-                        .from('files')
-                        .getPublicUrl(uploadData.path);
-
-                    // Atualizar resultado com URL do Supabase
-                    result.video.url = publicUrlData.publicUrl;
-
-                    console.log('Video uploaded to Supabase:', publicUrlData.publicUrl);
+                    console.log('Video uploaded to storage:', uploadResult.url);
                 } catch (uploadError) {
-                    console.error('Failed to upload video to Supabase:', uploadError);
+                    console.error('Failed to upload video to storage:', uploadError);
                     // Continuar mesmo se upload falhar (usar URL temporária do fal.ai)
                 }
             }
@@ -286,17 +282,6 @@ export const POST = async (req: Request) => {
                 console.error('Failed to update project:', projectUpdateError);
                 // Não falhar o webhook se atualização do project falhar
             }
-        } else if (payload.status === 'FAILED') {
-            await database
-                .update(falJobs)
-                .set({
-                    status: 'failed',
-                    error: payload.error || 'Unknown error',
-                    completedAt: new Date(),
-                })
-                .where(eq(falJobs.requestId, payload.request_id));
-
-            console.error('Job failed:', payload.request_id, payload.error);
         }
 
         return NextResponse.json({ success: true }, { status: 200 });

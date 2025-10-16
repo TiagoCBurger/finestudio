@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useAnalytics } from '@/hooks/use-analytics';
-import { useFalJob } from '@/hooks/use-fal-job';
 import { download } from '@/lib/download';
 import { handleError } from '@/lib/error/handle';
 import { imageModels, getEnabledImageModels } from '@/lib/models/image';
@@ -63,99 +62,11 @@ export const ImageTransform = ({
   );
   const [requestId, setRequestId] = useState<string | null>(null);
 
-  // Hook para monitorar job do fal.ai
-  const { job, loading: jobLoading, error: jobError } = useFalJob(requestId);
   const project = useProject();
 
-  // Polling inteligente: só faz polling quando há um requestId ativo
-  useEffect(() => {
-    if (!requestId || !project?.id) return;
-
-    console.log('🔄 Starting smart polling for job:', requestId);
-
-    const pollInterval = setInterval(() => {
-      console.log('🔄 Polling project for updates...');
-      mutate(`/api/projects/${project.id}`);
-    }, 3000); // Poll a cada 3 segundos
-
-    // Limpar após 60 segundos (timeout)
-    const timeout = setTimeout(() => {
-      console.log('⏱️ Polling timeout reached');
-      clearInterval(pollInterval);
-      setLoading(false);
-      toast.error('Image generation timeout. Please refresh the page.');
-    }, 60000);
-
-    return () => {
-      console.log('🛑 Stopping smart polling');
-      clearInterval(pollInterval);
-      clearTimeout(timeout);
-    };
-  }, [requestId, project?.id]);
-
-  // Debug: log quando requestId muda
-  useEffect(() => {
-    console.log('🔑 RequestId changed:', requestId);
-    if (requestId) {
-      console.log('✅ Starting to monitor job:', requestId);
-    }
-  }, [requestId]);
-
-  // Atualizar nó quando job completar
-  useEffect(() => {
-    if (!job) {
-      console.log('No job data yet');
-      return;
-    }
-
-    console.log('🔄 Job status changed:', {
-      status: job?.status,
-      hasResult: !!job?.result,
-      requestId: job?.requestId,
-      resultKeys: job?.result ? Object.keys(job.result) : [],
-    });
-
-    if (job?.status === 'completed' && job.result) {
-      console.log('✅ Fal.ai job completed! Full result:', JSON.stringify(job.result, null, 2));
-
-      // Extrair URL da imagem do resultado
-      const imageUrl = job.result.images?.[0]?.url;
-      console.log('🖼️ Extracted image URL:', imageUrl);
-
-      if (imageUrl) {
-        console.log('🔄 Updating node data with image URL...');
-
-        // Atualizar com o mesmo formato que o modo síncrono
-        const newData = {
-          ...data,
-          generated: {
-            url: imageUrl,
-            type: 'image/png',
-          },
-          updatedAt: new Date().toISOString(),
-        };
-
-        console.log('📦 New node data:', newData);
-        console.log('🚀 Calling updateNodeData...');
-        updateNodeData(id, newData);
-        console.log('✅ updateNodeData called successfully!');
-
-        toast.success('Image generated successfully via webhook!');
-        setRequestId(null); // Limpar request_id
-        setLoading(false); // Parar loading
-      } else {
-        console.error('❌ No image URL found in result:', job.result);
-        console.error('Result structure:', JSON.stringify(job.result, null, 2));
-      }
-    } else if (job?.status === 'failed') {
-      console.error('❌ Fal.ai job failed:', job.error);
-      toast.error(`Image generation failed: ${job.error}`);
-      setRequestId(null); // Limpar request_id
-      setLoading(false); // Parar loading
-    } else {
-      console.log('⏳ Job still pending or no result yet');
-    }
-  }, [job, id, updateNodeData, data]);
+  // Nota: Removido useFalJob e polling - agora usamos APENAS Supabase Realtime
+  // O webhook atualiza o projeto no banco e o Realtime notifica automaticamente via use-project-realtime hook
+  // Quando o projeto é atualizado, o componente re-renderiza com os novos dados automaticamente
   const hasIncomingImageNodes =
     getImagesFromImageNodes(getIncomers({ id }, getNodes(), getEdges()))
       .length > 0;
@@ -165,7 +76,7 @@ export const ImageTransform = ({
   const size = data.size ?? selectedModel?.sizes?.at(0);
 
   const handleGenerate = useCallback(async () => {
-    if (loading || jobLoading || !project?.id) {
+    if (loading || !project?.id) {
       return;
     }
 
@@ -258,9 +169,26 @@ export const ImageTransform = ({
 
       setTimeout(() => mutate('credits'), 5000);
     } catch (error) {
+      const timestamp = new Date().toISOString();
+      console.error(`❌ [${timestamp}] Error in handleGenerate:`, error);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      console.error('Error type:', typeof error);
+      console.error('Error message:', error instanceof Error ? error.message : String(error));
+
+      // Se o erro for sobre .map(), adicionar contexto extra
+      if (error instanceof Error && error.message.includes('map')) {
+        console.error('🔍 MAP ERROR DETECTED - This should not happen anymore!');
+        console.error('Current state:', {
+          loading,
+          hasProject: !!project?.id,
+          modelId,
+          size,
+        });
+      }
+
       handleError('Error generating image', error);
-      setLoading(false); // Parar loading apenas em caso de erro
-      setRequestId(null); // Limpar requestId em caso de erro
+      setLoading(false);
+      setRequestId(null);
     }
     // NÃO usar finally para não parar loading no modo webhook
   }, [
@@ -313,7 +241,14 @@ export const ImageTransform = ({
   );
 
   const toolbar = useMemo<ComponentProps<typeof NodeLayout>['toolbar']>(() => {
-    const enabledModels = getEnabledImageModels() || {};
+    const enabledModels = getEnabledImageModels();
+
+    // Garantir que enabledModels é um objeto válido antes de usar Object.entries
+    if (!enabledModels || typeof enabledModels !== 'object') {
+      console.error('getEnabledImageModels returned invalid data:', enabledModels);
+      return [];
+    }
+
     const availableModels = Object.fromEntries(
       Object.entries(enabledModels).map(([key, model]) => [
         key,
@@ -354,12 +289,10 @@ export const ImageTransform = ({
       });
     }
 
-    const isGenerating = loading || jobLoading;
-
     items.push(
-      isGenerating
+      loading
         ? {
-          tooltip: jobLoading ? 'Processing via webhook...' : 'Generating...',
+          tooltip: 'Generating...',
           children: (
             <Button size="icon" className="rounded-full" disabled>
               <Loader2Icon className="animate-spin" size={12} />
@@ -373,7 +306,7 @@ export const ImageTransform = ({
               size="icon"
               className="rounded-full"
               onClick={handleGenerate}
-              disabled={isGenerating || !project?.id}
+              disabled={loading || !project?.id}
             >
               {data.generated?.url ? (
                 <RotateCcwIcon size={12} />
@@ -425,7 +358,6 @@ export const ImageTransform = ({
     selectedModel?.sizes,
     size,
     loading,
-    jobLoading,
     data.generated,
     data.updatedAt,
     handleGenerate,
@@ -448,7 +380,7 @@ export const ImageTransform = ({
 
   return (
     <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>
-      {(loading || jobLoading) && (
+      {loading && (
         <Skeleton
           className="flex w-full animate-pulse items-center justify-center rounded-b-xl"
           style={{ aspectRatio }}
@@ -459,12 +391,12 @@ export const ImageTransform = ({
               className="size-4 animate-spin text-muted-foreground"
             />
             <p className="text-xs text-muted-foreground">
-              {jobLoading ? 'Processing...' : 'Generating...'}
+              Generating...
             </p>
           </div>
         </Skeleton>
       )}
-      {!loading && !jobLoading && !data.generated?.url && (
+      {!loading && !data.generated?.url && (
         <div
           className="flex w-full items-center justify-center rounded-b-xl bg-secondary p-4"
           style={{ aspectRatio }}
@@ -475,7 +407,7 @@ export const ImageTransform = ({
           </p>
         </div>
       )}
-      {!loading && !jobLoading && data.generated?.url && (
+      {!loading && data.generated?.url && (
         <Image
           src={data.generated.url}
           alt="Generated image"

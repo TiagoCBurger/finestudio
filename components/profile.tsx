@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/dialog';
 import { handleError } from '@/lib/error/handle';
 import { createClient } from '@/lib/supabase/client';
-import { uploadFile } from '@/lib/upload';
+import { uploadFile } from '@/lib/upload.client';
 import type { UserAttributes } from '@supabase/supabase-js';
 import { Loader2Icon } from 'lucide-react';
 import Image from 'next/image';

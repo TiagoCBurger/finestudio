@@ -5,7 +5,7 @@ import {
   type DropzoneProps,
 } from '@/components/ui/kibo-ui/dropzone';
 import { handleError } from '@/lib/error/handle';
-import { uploadFile } from '@/lib/upload';
+import { uploadFile } from '@/lib/upload.client';
 import Image from 'next/image';
 import { type ReactNode, useState } from 'react';
 

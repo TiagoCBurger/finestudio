@@ -86,6 +86,10 @@ export const generateSpeechAction = async ({
       viewport: Viewport;
     };
 
+    if (!content || !Array.isArray(content.nodes)) {
+      throw new Error('Invalid project content structure');
+    }
+
     const existingNode = content.nodes.find((n) => n.id === nodeId);
 
     if (!existingNode) {

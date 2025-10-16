@@ -5,7 +5,7 @@ import {
   DropzoneEmptyState,
 } from '@/components/ui/kibo-ui/dropzone';
 import { handleError } from '@/lib/error/handle';
-import { uploadFile } from '@/lib/upload';
+import { uploadFile } from '@/lib/upload.client';
 import { useReactFlow } from '@xyflow/react';
 import { FileIcon, Loader2Icon } from 'lucide-react';
 import { useState } from 'react';

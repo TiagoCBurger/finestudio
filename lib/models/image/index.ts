@@ -129,13 +129,24 @@ export const imageModels: Record<string, TersaImageModel> = {
  * Use esta função para filtrar modelos ativos na UI
  */
 export const getEnabledImageModels = (): Record<string, TersaImageModel> => {
-  if (!imageModels || typeof imageModels !== 'object') {
-    console.error('imageModels is not properly initialized:', imageModels);
+  try {
+    if (!imageModels || typeof imageModels !== 'object') {
+      console.error('imageModels is not properly initialized:', imageModels);
+      return {};
+    }
+
+    const entries = Object.entries(imageModels);
+    if (!Array.isArray(entries)) {
+      console.error('Object.entries(imageModels) did not return an array:', entries);
+      return {};
+    }
+
+    const filtered = entries.filter(([_, model]) => model?.enabled !== false);
+    return Object.fromEntries(filtered);
+  } catch (error) {
+    console.error('Error in getEnabledImageModels:', error);
     return {};
   }
-  return Object.fromEntries(
-    Object.entries(imageModels).filter(([_, model]) => model.enabled !== false)
-  );
 };
 
 /**

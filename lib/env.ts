@@ -17,6 +17,16 @@ export const env = createEnv({
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     SUPABASE_AUTH_HOOK_SECRET: z.string().min(1).optional(),
 
+    // Storage Provider Configuration
+    STORAGE_PROVIDER: z.enum(['r2', 'supabase']).optional().default('r2'),
+
+    // Cloudflare R2 Configuration (required when STORAGE_PROVIDER=r2)
+    R2_ACCOUNT_ID: z.string().min(1).optional(),
+    R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+    R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+    R2_BUCKET_NAME: z.string().min(1).optional(),
+    R2_PUBLIC_URL: z.string().url().optional(),
+
     // Fal.ai (Obrigatório)
     FAL_API_KEY: z.string().min(1),
 
@@ -64,6 +74,13 @@ export const env = createEnv({
     // Stripe removido
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_AUTH_HOOK_SECRET: process.env.SUPABASE_AUTH_HOOK_SECRET,
+    // Storage Provider
+    STORAGE_PROVIDER: process.env.STORAGE_PROVIDER,
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+    R2_BUCKET_NAME: process.env.R2_BUCKET_NAME,
+    R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
     RUNWAYML_API_SECRET: process.env.RUNWAYML_API_SECRET,
     LUMA_API_KEY: process.env.LUMA_API_KEY,
     NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY,

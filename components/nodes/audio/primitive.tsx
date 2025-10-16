@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/kibo-ui/dropzone';
 import { Skeleton } from '@/components/ui/skeleton';
 import { handleError } from '@/lib/error/handle';
-import { uploadFile } from '@/lib/upload';
+import { uploadFile } from '@/lib/upload.client';
 import { useProject } from '@/providers/project';
 import { useReactFlow } from '@xyflow/react';
 import { Loader2Icon } from 'lucide-react';

@@ -3,10 +3,11 @@ import { NextResponse } from 'next/server';
 
 export async function GET(
     request: Request,
-    { params }: { params: { requestId: string } }
+    { params }: { params: Promise<{ requestId: string }> }
 ) {
     try {
-        const job = await getFalJobByRequestId(params.requestId);
+        const { requestId } = await params;
+        const job = await getFalJobByRequestId(requestId);
 
         if (!job) {
             return NextResponse.json(

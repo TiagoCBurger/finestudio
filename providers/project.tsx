@@ -29,7 +29,8 @@ export const ProjectProvider = ({
   children: ReactNode;
   data: typeof projects.$inferSelect;
 }) => {
-  // TODO: Habilitar Realtime após configurar no Supabase Dashboard
+  // TODO: Realtime está causando problemas com re-renders
+  // Usar polling inteligente por enquanto
   // useProjectRealtime(data.id);
 
   return (

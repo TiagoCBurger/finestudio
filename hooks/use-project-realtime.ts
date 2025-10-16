@@ -16,31 +16,44 @@ export function useProjectRealtime(projectId: string | undefined) {
 
         console.log('🔴 Subscribing to project realtime updates:', projectId);
 
-        // Subscrever às mudanças na tabela projects
+        // Subscrever às mudanças na tabela project (não projects!)
         const channel = supabase
-            .channel(`project:${projectId}`)
+            .channel(`project:${projectId}`, {
+                config: {
+                    broadcast: { self: true },
+                    presence: { key: projectId },
+                },
+            })
             .on(
                 'postgres_changes',
                 {
                     event: 'UPDATE',
                     schema: 'public',
-                    table: 'projects',
+                    table: 'project', // Nome correto da tabela
                     filter: `id=eq.${projectId}`,
                 },
                 (payload) => {
                     console.log('🔴 Project updated via realtime:', payload);
 
                     // Revalidar o cache do SWR para atualizar o UI
-                    // Usar try-catch para evitar erros durante a revalidação
                     try {
                         mutate(`/api/projects/${projectId}`);
+                        console.log('🔴 Project cache revalidated');
                     } catch (error) {
                         console.error('🔴 Error revalidating project:', error);
                     }
                 }
             )
-            .subscribe((status) => {
-                console.log('🔴 Realtime subscription status:', status);
+            .subscribe((status, err) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log('🔴 Realtime subscription status: SUBSCRIBED ✅');
+                } else if (status === 'CHANNEL_ERROR') {
+                    console.error('🔴 Realtime subscription error:', err);
+                } else if (status === 'TIMED_OUT') {
+                    console.error('🔴 Realtime subscription timed out');
+                } else {
+                    console.log('🔴 Realtime subscription status:', status);
+                }
             });
 
         // Cleanup ao desmontar

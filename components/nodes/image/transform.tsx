@@ -67,6 +67,32 @@ export const ImageTransform = ({
   const { job, loading: jobLoading, error: jobError } = useFalJob(requestId);
   const project = useProject();
 
+  // Polling inteligente: só faz polling quando há um requestId ativo
+  useEffect(() => {
+    if (!requestId || !project?.id) return;
+
+    console.log('🔄 Starting smart polling for job:', requestId);
+
+    const pollInterval = setInterval(() => {
+      console.log('🔄 Polling project for updates...');
+      mutate(`/api/projects/${project.id}`);
+    }, 3000); // Poll a cada 3 segundos
+
+    // Limpar após 60 segundos (timeout)
+    const timeout = setTimeout(() => {
+      console.log('⏱️ Polling timeout reached');
+      clearInterval(pollInterval);
+      setLoading(false);
+      toast.error('Image generation timeout. Please refresh the page.');
+    }, 60000);
+
+    return () => {
+      console.log('🛑 Stopping smart polling');
+      clearInterval(pollInterval);
+      clearTimeout(timeout);
+    };
+  }, [requestId, project?.id]);
+
   // Debug: log quando requestId muda
   useEffect(() => {
     console.log('🔑 RequestId changed:', requestId);

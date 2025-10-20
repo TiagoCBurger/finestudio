@@ -1,7 +1,8 @@
 /**
  * Storage Provider Types
  * 
- * Defines the common interface for all storage providers (R2, Supabase, etc.)
+ * Defines the common interface for all storage providers (R2, Supabase)
+ * This abstraction allows switching between storage backends without code changes
  */
 
 /**
@@ -11,6 +12,18 @@
  * - screenshots: Project screenshots (supports upsert)
  */
 export type StorageBucket = 'avatars' | 'files' | 'screenshots';
+
+/**
+ * Valid storage bucket names for runtime validation
+ */
+export const STORAGE_BUCKETS: readonly StorageBucket[] = ['avatars', 'files', 'screenshots'] as const;
+
+/**
+ * Type guard to check if a string is a valid StorageBucket
+ */
+export function isValidStorageBucket(bucket: string): bucket is StorageBucket {
+    return STORAGE_BUCKETS.includes(bucket as StorageBucket);
+}
 
 /**
  * Options for uploading files to storage
@@ -41,8 +54,8 @@ export interface UploadResult {
 /**
  * Storage Provider Interface
  * 
- * All storage providers must implement this interface to ensure
- * consistent behavior across different storage backends.
+ * Common interface implemented by all storage providers (R2, Supabase)
+ * Allows seamless switching between storage backends via STORAGE_PROVIDER env var
  */
 export interface StorageProvider {
     /**

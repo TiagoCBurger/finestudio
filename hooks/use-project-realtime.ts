@@ -1,76 +1,564 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import {
+    REALTIME_SUBSCRIBE_STATES,
+    REALTIME_CHANNEL_STATES,
+    type RealtimeChannel,
+    type SupabaseClient
+} from '@supabase/supabase-js';
 import { mutate } from 'swr';
+import { realtimeLogger } from '@/lib/realtime-logger';
+
+/**
+ * Configuration constants for subscription management
+ */
+const DEBOUNCE_DELAY = 500; // ms - Delay before attempting subscription
+const MAX_RETRIES = 3; // Maximum number of retry attempts
+const RETRY_DELAYS = [1000, 2000, 4000]; // ms - Exponential backoff delays
+
+/**
+ * Payload structure for project_updated broadcast events
+ */
+interface ProjectUpdatePayload {
+    type: 'UPDATE' | 'INSERT' | 'DELETE';
+    table: string;
+    schema: string;
+    new?: Record<string, unknown>;
+    old?: Record<string, unknown>;
+}
+
+/**
+ * Subscription state tracking
+ */
+interface SubscriptionState {
+    isSubscribing: boolean;
+    isSubscribed: boolean;
+    retryCount: number;
+    lastAttemptTimestamp: number | null;
+    lastError?: {
+        message: string;
+        timestamp: number;
+        status?: string;
+        hint?: string;
+    };
+}
+
+/**
+ * Return type for useProjectRealtime hook
+ */
+interface UseProjectRealtimeReturn {
+    subscriptionState: SubscriptionState;
+    retrySubscription: () => void;
+}
 
 /**
  * Hook to subscribe to project changes via Supabase Realtime
  * Automatically updates when fal.ai webhook modifies the project
  * 
  * Uses broadcast for better scalability (recommended over postgres_changes)
+ * Follows Supabase Realtime best practices with proper error handling and cleanup
+ * 
+ * @param projectId - The ID of the project to subscribe to
+ * @returns Object containing subscription state and retry method
  */
-export function useProjectRealtime(projectId: string | undefined) {
-    const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null);
+export function useProjectRealtime(projectId: string | undefined): UseProjectRealtimeReturn {
+    const channelRef = useRef<RealtimeChannel | null>(null);
+    const supabaseRef = useRef<SupabaseClient | null>(null);
+    const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const subscriptionStateRef = useRef<SubscriptionState>({
+        isSubscribing: false,
+        isSubscribed: false,
+        retryCount: 0,
+        lastAttemptTimestamp: null
+    });
 
-    useEffect(() => {
-        if (!projectId) return;
+    // State to trigger re-renders when subscription state changes
+    const [subscriptionState, setSubscriptionState] = useState<SubscriptionState>({
+        isSubscribing: false,
+        isSubscribed: false,
+        retryCount: 0,
+        lastAttemptTimestamp: null
+    });
 
-        // Prevent duplicate subscriptions
-        if (channelRef.current?.state === 'subscribed') {
-            console.log('🔴 Already subscribed to project:', projectId);
+    // Helper to update both ref and state
+    const updateSubscriptionState = useCallback((newState: Partial<SubscriptionState>) => {
+        subscriptionStateRef.current = {
+            ...subscriptionStateRef.current,
+            ...newState
+        };
+        setSubscriptionState(subscriptionStateRef.current);
+
+        realtimeLogger.info('📊 Subscription state updated', realtimeLogger.createContext({
+            projectId,
+            ...subscriptionStateRef.current
+        }));
+    }, [projectId]);
+
+    // Manual retry method for debugging
+    const retrySubscription = useCallback(() => {
+        realtimeLogger.info('🔄 Manual retry requested', realtimeLogger.createContext({
+            projectId,
+            currentState: subscriptionStateRef.current
+        }));
+
+        // Clean up existing channel
+        if (channelRef.current && supabaseRef.current) {
+            supabaseRef.current.removeChannel(channelRef.current);
+            channelRef.current = null;
+        }
+
+        // Reset state to allow retry
+        updateSubscriptionState({
+            isSubscribing: false,
+            isSubscribed: false,
+            retryCount: 0,
+            lastAttemptTimestamp: null,
+            lastError: undefined
+        });
+
+        realtimeLogger.success('✅ Subscription reset, will retry automatically', { projectId });
+    }, [projectId, updateSubscriptionState]);
+
+    // Memoized handler for project updates
+    const handleProjectUpdate = useCallback((payload: ProjectUpdatePayload) => {
+        // Enhanced broadcast receive logging with detailed payload information
+        realtimeLogger.info('📨 Broadcast received', realtimeLogger.createContext({
+            projectId,
+            payloadType: typeof payload,
+            hasPayload: !!payload,
+            payloadKeys: payload ? Object.keys(payload) : []
+        }));
+
+        // Filter out unexpected payload structures to prevent raw data display
+        if (!payload || typeof payload !== 'object') {
+            realtimeLogger.warn('Invalid payload received, ignoring', {
+                projectId,
+                payload: typeof payload,
+                hint: 'Check database trigger function is sending correct payload structure'
+            });
             return;
         }
 
-        const supabase = createClient();
+        // If payload contains raw project data (nodes array), extract only what we need
+        const cleanPayload = {
+            type: payload.type || 'UPDATE',
+            table: payload.table || 'project',
+            schema: payload.schema || 'public'
+        };
 
-        console.log('🔴 Subscribing to project realtime updates:', projectId);
+        realtimeLogger.info('Project updated via broadcast', realtimeLogger.createContext({
+            projectId,
+            type: cleanPayload.type,
+            table: cleanPayload.table,
+            hasNewData: !!payload.new,
+            hasOldData: !!payload.old
+        }));
 
-        // Use broadcast with private channel for better scalability
-        const channel = supabase
-            .channel(`project:${projectId}`, {
-                config: {
-                    broadcast: { self: true, ack: true },
-                    private: true, // Requires RLS policies on realtime.messages
-                },
-            })
-            .on(
-                'broadcast',
-                { event: 'project_updated' },
-                (payload) => {
-                    console.log('🔴 Project updated via broadcast:', payload);
+        // Revalidate SWR cache to update UI
+        try {
+            realtimeLogger.info('Revalidating project cache', { projectId });
+            mutate(`/api/projects/${projectId}`);
+            realtimeLogger.success('Project cache revalidated successfully', { projectId });
+        } catch (error) {
+            realtimeLogger.error('Error revalidating project cache', realtimeLogger.createContext({
+                projectId,
+                error: error instanceof Error ? error.message : error,
+                hint: 'Check SWR configuration and API endpoint availability'
+            }));
+        }
+    }, [projectId]);
 
-                    // Revalidate SWR cache to update UI
-                    try {
-                        mutate(`/api/projects/${projectId}`);
-                        console.log('🔴 Project cache revalidated');
-                    } catch (error) {
-                        console.error('🔴 Error revalidating project:', error);
-                    }
-                }
-            )
-            .subscribe((status, err) => {
-                if (status === 'SUBSCRIBED') {
-                    console.log('🔴 Realtime subscription status: SUBSCRIBED ✅');
-                } else if (status === 'CHANNEL_ERROR') {
-                    console.error('🔴 Realtime subscription error:', err);
-                    // Client will automatically retry
-                } else if (status === 'TIMED_OUT') {
-                    console.error('🔴 Realtime subscription timed out');
-                } else {
-                    console.log('🔴 Realtime subscription status:', status);
-                }
+    useEffect(() => {
+        // Clear any pending debounce timer
+        if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+            debounceTimerRef.current = null;
+        }
+
+        if (!projectId) {
+            // Clean up if projectId becomes undefined
+            realtimeLogger.info('No projectId provided', {
+                action: 'cleanup'
             });
 
-        channelRef.current = channel;
-
-        // Cleanup on unmount
-        return () => {
-            console.log('🔴 Unsubscribing from project realtime');
             if (channelRef.current) {
-                supabase.removeChannel(channelRef.current);
+                supabaseRef.current?.removeChannel(channelRef.current);
                 channelRef.current = null;
             }
+            updateSubscriptionState({
+                isSubscribing: false,
+                isSubscribed: false,
+                retryCount: 0,
+                lastAttemptTimestamp: null,
+                lastError: undefined
+            });
+            return;
+        }
+
+        // Debounce subscription attempts to prevent rapid re-subscriptions
+        realtimeLogger.info('Scheduling subscription attempt with debounce', {
+            projectId,
+            debounceDelay: DEBOUNCE_DELAY,
+            currentState: subscriptionStateRef.current
+        });
+
+        debounceTimerRef.current = setTimeout(() => {
+            const state = subscriptionStateRef.current;
+            const now = Date.now();
+
+            // Enhanced state checking - verify multiple conditions before subscribing
+            const channelState = channelRef.current?.state;
+            const isChannelJoined = channelState === REALTIME_CHANNEL_STATES.joined;
+            const isAlreadySubscribed = isChannelJoined || state.isSubscribed;
+
+            // Check if we're already in the process of subscribing
+            if (state.isSubscribing) {
+                realtimeLogger.info('Subscription already in progress, skipping', {
+                    projectId,
+                    channelState,
+                    subscriptionState: state
+                });
+                return;
+            }
+
+            // Check if already subscribed
+            if (isAlreadySubscribed) {
+                realtimeLogger.info('Already subscribed to project, skipping', {
+                    projectId,
+                    channelState,
+                    isChannelJoined,
+                    subscriptionState: state
+                });
+                return;
+            }
+
+            // Check if we should wait before retrying (timestamp verification)
+            if (state.lastAttemptTimestamp) {
+                const timeSinceLastAttempt = now - state.lastAttemptTimestamp;
+                const minRetryDelay = state.retryCount > 0 ? RETRY_DELAYS[Math.min(state.retryCount - 1, RETRY_DELAYS.length - 1)] : 0;
+
+                if (timeSinceLastAttempt < minRetryDelay) {
+                    realtimeLogger.info('Too soon to retry, waiting', {
+                        projectId,
+                        timeSinceLastAttempt,
+                        minRetryDelay,
+                        retryCount: state.retryCount
+                    });
+                    return;
+                }
+            }
+
+            // Check if we've exceeded max retries
+            if (state.retryCount >= MAX_RETRIES) {
+                realtimeLogger.error('Max retries exceeded, giving up', {
+                    projectId,
+                    retryCount: state.retryCount,
+                    maxRetries: MAX_RETRIES
+                });
+                return;
+            }
+
+            // Update subscription state
+            updateSubscriptionState({
+                isSubscribing: true,
+                lastAttemptTimestamp: now
+            });
+
+            realtimeLogger.info('Starting subscription attempt', {
+                projectId,
+                attemptNumber: state.retryCount + 1,
+                maxRetries: MAX_RETRIES,
+                channelState,
+                timestamp: now
+            });
+
+            // Create and cache Supabase client
+            if (!supabaseRef.current) {
+                supabaseRef.current = createClient();
+            }
+            const supabase = supabaseRef.current;
+
+            // Use broadcast with recommended settings
+            // Following naming convention: scope:entity:id
+            const channel = supabase
+                .channel(`project:${projectId}`, {
+                    config: {
+                        broadcast: {
+                            self: false, // Don't receive our own broadcasts
+                            ack: true    // Enable ack for better reliability
+                        },
+                        private: true, // Use private channel for better security
+                    },
+                })
+                .on(
+                    'broadcast' as any,
+                    { event: 'UPDATE' }, // Listen for UPDATE events from trigger
+                    handleProjectUpdate
+                )
+                .on(
+                    'broadcast' as any,
+                    { event: 'INSERT' }, // Listen for INSERT events from trigger
+                    handleProjectUpdate
+                );
+
+            channelRef.current = channel;
+
+            realtimeLogger.info('Channel created, getting session', {
+                projectId,
+                channelTopic: `project:${projectId}`
+            });
+
+            // Get the current session and set auth before subscribing (required for private channels)
+            supabase.auth.getSession()
+                .then(({ data: { session }, error: sessionError }) => {
+                    if (sessionError) {
+                        const errorInfo = {
+                            message: sessionError.message,
+                            timestamp: Date.now(),
+                            status: 'SESSION_ERROR',
+                            hint: 'Check authentication configuration and ensure user is logged in'
+                        };
+
+                        realtimeLogger.error('❌ Error getting session', realtimeLogger.createContext({
+                            projectId,
+                            error: sessionError.message,
+                            errorCode: sessionError.code,
+                            retryCount: state.retryCount,
+                            hint: errorInfo.hint
+                        }));
+
+                        updateSubscriptionState({
+                            isSubscribing: false,
+                            lastError: errorInfo
+                        });
+                        return;
+                    }
+
+                    if (!session) {
+                        const errorInfo = {
+                            message: 'No active session found',
+                            timestamp: Date.now(),
+                            status: 'NO_SESSION',
+                            hint: 'User must be logged in to use private channels. Redirect to login page or refresh the session.'
+                        };
+
+                        realtimeLogger.error('❌ No active session found', realtimeLogger.createContext({
+                            projectId,
+                            retryCount: state.retryCount,
+                            hint: errorInfo.hint
+                        }));
+
+                        updateSubscriptionState({
+                            isSubscribing: false,
+                            lastError: errorInfo
+                        });
+                        return;
+                    }
+
+                    realtimeLogger.info('✅ Session found, setting auth for realtime', realtimeLogger.createContext({
+                        projectId,
+                        sessionUserId: session.user.id,
+                        sessionExpiresAt: session.expires_at,
+                        retryCount: state.retryCount
+                    }));
+
+                    // Set auth with the current session token
+                    return supabase.realtime.setAuth(session.access_token);
+                })
+                .then(() => {
+                    realtimeLogger.info('🔐 Auth set for realtime, subscribing to channel', realtimeLogger.createContext({
+                        projectId,
+                        channelTopic: `project:${projectId}`,
+                        retryCount: state.retryCount
+                    }));
+
+                    // Subscribe after auth is set
+                    return channel.subscribe((status, err) => {
+                        const logContext = realtimeLogger.createContext({
+                            projectId,
+                            channelTopic: `project:${projectId}`,
+                            retryCount: subscriptionStateRef.current.retryCount,
+                            channelState: channel.state,
+                            status
+                        });
+
+                        realtimeLogger.info(`📡 Subscription status: ${status}`, logContext);
+
+                        switch (status) {
+                            case REALTIME_SUBSCRIBE_STATES.SUBSCRIBED:
+                                realtimeLogger.success('✅ SUBSCRIBED - Successfully connected to project channel', {
+                                    ...logContext,
+                                    hint: 'Channel is now active and will receive broadcasts'
+                                });
+                                updateSubscriptionState({
+                                    isSubscribing: false,
+                                    isSubscribed: true,
+                                    retryCount: 0, // Reset retry count on success
+                                    lastAttemptTimestamp: Date.now(),
+                                    lastError: undefined // Clear any previous errors
+                                });
+                                break;
+
+                            case REALTIME_SUBSCRIBE_STATES.CHANNEL_ERROR:
+                                let channelErrorHint = 'Will retry with exponential backoff. Check browser console for more details.';
+
+                                // Provide actionable hints based on error type
+                                if (err?.message?.includes('403') || err?.message?.includes('Forbidden')) {
+                                    channelErrorHint = 'Authorization failed. Check RLS policies on realtime.messages table and ensure user has access to this project.';
+                                } else if (err?.message?.includes('401') || err?.message?.includes('Unauthorized')) {
+                                    channelErrorHint = 'Authentication failed. Session may have expired. Try refreshing the page or logging in again.';
+                                } else if (err?.message?.includes('timeout')) {
+                                    channelErrorHint = 'Connection timeout. Check network connectivity and Supabase service status.';
+                                }
+
+                                const errorDetails = {
+                                    ...logContext,
+                                    error: err,
+                                    errorMessage: err?.message || 'Unknown error',
+                                    errorType: (err as any)?.type || 'unknown',
+                                    nextRetryIn: RETRY_DELAYS[Math.min(subscriptionStateRef.current.retryCount, RETRY_DELAYS.length - 1)],
+                                    retriesRemaining: MAX_RETRIES - subscriptionStateRef.current.retryCount - 1,
+                                    hint: channelErrorHint
+                                };
+
+                                realtimeLogger.error('❌ CHANNEL_ERROR - Subscription failed', errorDetails);
+
+                                updateSubscriptionState({
+                                    isSubscribing: false,
+                                    isSubscribed: false,
+                                    retryCount: subscriptionStateRef.current.retryCount + 1,
+                                    lastAttemptTimestamp: Date.now(),
+                                    lastError: {
+                                        message: err?.message || 'Unknown error',
+                                        timestamp: Date.now(),
+                                        status: 'CHANNEL_ERROR',
+                                        hint: channelErrorHint
+                                    }
+                                });
+                                break;
+
+                            case REALTIME_SUBSCRIBE_STATES.TIMED_OUT:
+                                const nextRetryDelay = RETRY_DELAYS[Math.min(subscriptionStateRef.current.retryCount, RETRY_DELAYS.length - 1)];
+                                const timeoutHint = `Connection timed out. Will retry in ${nextRetryDelay}ms. Check network connectivity and firewall settings.`;
+
+                                realtimeLogger.error('⏱️ TIMED_OUT - Subscription attempt timed out', {
+                                    ...logContext,
+                                    nextRetryDelay,
+                                    retriesRemaining: MAX_RETRIES - subscriptionStateRef.current.retryCount - 1,
+                                    hint: timeoutHint
+                                });
+
+                                updateSubscriptionState({
+                                    isSubscribing: false,
+                                    isSubscribed: false,
+                                    retryCount: subscriptionStateRef.current.retryCount + 1,
+                                    lastAttemptTimestamp: Date.now(),
+                                    lastError: {
+                                        message: 'Subscription timed out',
+                                        timestamp: Date.now(),
+                                        status: 'TIMED_OUT',
+                                        hint: timeoutHint
+                                    }
+                                });
+                                break;
+
+                            case REALTIME_SUBSCRIBE_STATES.CLOSED:
+                                const closedHint = 'Channel was closed. This may be intentional or due to network issues.';
+
+                                realtimeLogger.info('🔌 CLOSED - Channel connection closed', {
+                                    ...logContext,
+                                    hint: closedHint
+                                });
+
+                                updateSubscriptionState({
+                                    isSubscribing: false,
+                                    isSubscribed: false,
+                                    retryCount: subscriptionStateRef.current.retryCount,
+                                    lastAttemptTimestamp: Date.now(),
+                                    lastError: {
+                                        message: 'Channel closed',
+                                        timestamp: Date.now(),
+                                        status: 'CLOSED',
+                                        hint: closedHint
+                                    }
+                                });
+                                break;
+
+                            default:
+                                realtimeLogger.info(`📊 Status update: ${status}`, {
+                                    ...logContext,
+                                    error: err,
+                                    hint: 'Intermediate subscription state'
+                                });
+                        }
+                    });
+                })
+                .catch((error) => {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    const errorStack = error instanceof Error ? error.stack : undefined;
+                    const catchHint = 'Unexpected error during subscription. Check browser console for stack trace and verify Supabase configuration.';
+
+                    realtimeLogger.error('❌ Error during subscription process', realtimeLogger.createContext({
+                        projectId,
+                        error: errorMessage,
+                        errorStack,
+                        retryCount: state.retryCount,
+                        retriesRemaining: MAX_RETRIES - state.retryCount - 1,
+                        hint: catchHint
+                    }));
+
+                    updateSubscriptionState({
+                        isSubscribing: false,
+                        isSubscribed: false,
+                        retryCount: subscriptionStateRef.current.retryCount + 1,
+                        lastAttemptTimestamp: Date.now(),
+                        lastError: {
+                            message: errorMessage,
+                            timestamp: Date.now(),
+                            status: 'SUBSCRIPTION_ERROR',
+                            hint: catchHint
+                        }
+                    });
+                });
+        }, DEBOUNCE_DELAY);
+
+        // Cleanup on unmount or projectId change
+        return () => {
+            realtimeLogger.info('Cleaning up subscription for project', {
+                projectId,
+                channelState: channelRef.current?.state,
+                subscriptionState: subscriptionStateRef.current
+            });
+
+            // Clear debounce timer
+            if (debounceTimerRef.current) {
+                clearTimeout(debounceTimerRef.current);
+                debounceTimerRef.current = null;
+            }
+
+            // Reset subscription state
+            updateSubscriptionState({
+                isSubscribing: false,
+                isSubscribed: false,
+                retryCount: 0,
+                lastAttemptTimestamp: null,
+                lastError: undefined
+            });
+
+            // Remove channel
+            if (channelRef.current && supabaseRef.current) {
+                supabaseRef.current.removeChannel(channelRef.current);
+                channelRef.current = null;
+                realtimeLogger.success('Channel removed successfully', { projectId });
+            }
         };
-    }, [projectId]);
+    }, [projectId, handleProjectUpdate, updateSubscriptionState]);
+
+    // Return subscription state and retry method for debugging
+    return {
+        subscriptionState,
+        retrySubscription
+    };
 }

@@ -13,6 +13,10 @@ export type VideoModel = {
     imagePrompt: string | undefined;
     duration: number;
     aspectRatio: string;
+    _metadata?: {
+      nodeId?: string;
+      projectId?: string;
+    };
   }) => Promise<string>;
 };
 

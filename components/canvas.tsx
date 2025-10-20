@@ -30,9 +30,10 @@ import {
 import { BoxSelectIcon, PlusIcon } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import type { MouseEvent, MouseEventHandler, ClipboardEvent } from 'react';
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useDebouncedCallback } from 'use-debounce';
+import { mutate } from 'swr';
 import { uploadFile } from '@/lib/upload.client';
 import { ConnectionLine } from './connection-line';
 import { edgeTypes } from './edges';
@@ -75,25 +76,109 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
   const analytics = useAnalytics();
   const [saveState, setSaveState] = useSaveProject();
 
+  // Track previous content to prevent unnecessary comparisons
+  const prevContentRef = useRef<string | null>(null);
+
+  // Sync nodes and edges when project updates via Realtime
+  useEffect(() => {
+    if (!content?.nodes || !content?.edges) {
+      return;
+    }
+
+    // Serialize content once for comparison
+    const contentString = JSON.stringify(content);
+
+    // Skip if content hasn't changed at all
+    if (prevContentRef.current === contentString) {
+      return;
+    }
+
+    // Only log when we're actually checking (content changed)
+    console.log('🔄 Checking for canvas sync:', {
+      projectNodeCount: content.nodes.length,
+      projectEdgeCount: content.edges.length,
+      canvasNodeCount: nodes.length,
+      canvasEdgeCount: edges.length,
+      projectId: project?.id,
+    });
+
+    // Compare with current state
+    const currentNodesString = JSON.stringify(nodes);
+    const currentEdgesString = JSON.stringify(edges);
+    const contentNodesString = JSON.stringify(content.nodes);
+    const contentEdgesString = JSON.stringify(content.edges);
+
+    const nodesChanged = currentNodesString !== contentNodesString;
+    const edgesChanged = currentEdgesString !== contentEdgesString;
+
+    if (nodesChanged || edgesChanged) {
+      console.log('✅ Content changed via Realtime, updating canvas:', {
+        nodesChanged,
+        edgesChanged,
+      });
+
+      setNodes(content.nodes);
+      setEdges(content.edges);
+    } else {
+      console.log('ℹ️ Content unchanged, skipping update');
+    }
+
+    // Update previous content reference
+    prevContentRef.current = contentString;
+  }, [content, nodes, edges, project?.id]);
+
   const save = useDebouncedCallback(async () => {
     if (saveState.isSaving || !project?.userId || !project?.id) {
       return;
     }
 
+    const saveWithRetry = async (retries = 2) => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const newContent = toObject();
+          const response = await updateProjectAction(project.id, {
+            content: newContent,
+          });
+
+          if ('error' in response) {
+            throw new Error(response.error);
+          }
+
+          return newContent;
+        } catch (error) {
+          console.log(`Save attempt ${attempt + 1} failed:`, error instanceof Error ? error.message : error);
+
+          if (attempt === retries) {
+            throw error;
+          }
+
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        }
+      }
+    };
+
     try {
       setSaveState((prev) => ({ ...prev, isSaving: true }));
 
-      const response = await updateProjectAction(project.id, {
-        content: toObject(),
-      });
+      // Optimistic mutation: update cache before saving
+      const newContent = toObject();
+      const cacheKey = `/api/projects/${project.id}`;
 
-      if ('error' in response) {
-        throw new Error(response.error);
-      }
+      mutate(
+        cacheKey,
+        { ...project, content: newContent },
+        { revalidate: false }
+      );
 
+      await saveWithRetry();
       setSaveState((prev) => ({ ...prev, lastSaved: new Date() }));
     } catch (error) {
-      handleError('Error saving project', error);
+      // Extract only the error message to prevent raw data from being displayed
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      handleError('Error saving project', errorMessage);
+      // Revert optimistic mutation in case of error
+      mutate(`/api/projects/${project.id}`);
     } finally {
       setSaveState((prev) => ({ ...prev, isSaving: false }));
     }

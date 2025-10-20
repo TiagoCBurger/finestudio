@@ -22,7 +22,7 @@ export const falServer = (
 ): VideoModel => ({
     modelId: imageToVideoModelId,
     textToVideoModelId,
-    generate: async ({ prompt, imagePrompt, duration, aspectRatio }) => {
+    generate: async ({ prompt, imagePrompt, duration, aspectRatio, _metadata }) => {
         // Escolher o endpoint correto baseado na presença de imagem
         const modelId = imagePrompt
             ? imageToVideoModelId  // Se tem imagem, usa image-to-video
@@ -64,6 +64,13 @@ export const falServer = (
             console.log('✅ Image URL added to input:', imagePrompt.substring(0, 50) + '...');
         } else {
             console.log('ℹ️ No image URL provided, using text-to-video mode');
+        }
+
+        // IMPORTANTE: Adicionar metadados para o webhook poder atualizar o nó correto
+        // Estes metadados são extraídos no webhook para atualizar o projeto
+        if (_metadata) {
+            input._metadata = _metadata;
+            console.log('📝 Metadata added to video generation:', _metadata);
         }
 
         console.log('🎬 Fal.ai video queue request:', {

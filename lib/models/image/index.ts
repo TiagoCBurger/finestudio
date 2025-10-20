@@ -5,6 +5,8 @@ import {
 } from '@/lib/providers';
 import type { ImageModel } from 'ai';
 import { falAI } from './fal';
+import { kieAI } from './kie';
+import { mockAI } from './mock';
 
 export type ImageSize = `${number}x${number}`;
 
@@ -31,6 +33,39 @@ if (!falAI || typeof falAI.image !== 'function') {
 }
 
 export const imageModels: Record<string, TersaImageModel> = {
+  // 🧪 MOCK - Modelos de teste sem custo
+  'mock-fast': {
+    label: '🧪 Mock Fast (Teste Grátis)',
+    chef: providers.mock,
+    providers: [
+      {
+        ...providers.mock,
+        model: mockAI.image('mock-fast'),
+        getCost: () => 0, // Grátis!
+      },
+    ],
+    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    priceIndicator: 'low',
+    supportsEdit: false,
+    default: false,
+    enabled: true, // ✅ Ativo para testes
+  },
+  'mock-edit': {
+    label: '🧪 Mock Edit (Teste Edição)',
+    chef: providers.mock,
+    providers: [
+      {
+        ...providers.mock,
+        model: mockAI.image('mock-edit'),
+        getCost: () => 0, // Grátis!
+      },
+    ],
+    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    priceIndicator: 'low',
+    supportsEdit: true,
+    default: false,
+    enabled: true, // ✅ Ativo para testes
+  },
   // 🍌 NANO BANANA - Modelo de edição de imagem rápido e econômico
   'fal-nano-banana': {
     label: '🍌 Nano Banana',
@@ -46,11 +81,11 @@ export const imageModels: Record<string, TersaImageModel> = {
     sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
     priceIndicator: 'low',
     supportsEdit: true,
-    default: true,
+    default: false,
     enabled: true, // ✅ Ativo
   },
   'fal-flux-dev-image-to-image': {
-    label: 'FLUX Dev Image-to-Image (Fal)',
+    label: 'FLUX Dev Image-to-Image',
     chef: providers.fal,
     providers: [
       {
@@ -62,7 +97,8 @@ export const imageModels: Record<string, TersaImageModel> = {
     ],
     sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
     supportsEdit: true,
-    enabled: false, // ✅ Ativo
+    default: true,
+    enabled: true, // ✅ Ativo
   },
   'fal-gpt-image-edit': {
     label: 'GPT Image Edit (BYOK)',
@@ -92,7 +128,7 @@ export const imageModels: Record<string, TersaImageModel> = {
       },
     ],
     sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-    enabled: false, // ✅ Ativo
+    enabled: true, // ✅ Ativo
   },
   'fal-flux-pro-kontext-max-multi': {
     label: 'FLUX Pro Kontext Max Multi (Fal)',
@@ -106,7 +142,7 @@ export const imageModels: Record<string, TersaImageModel> = {
       },
     ],
     sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-    enabled: false, // ✅ Ativo
+    enabled: true, // ✅ Ativo
   },
   'fal-ideogram-character': {
     label: 'Ideogram Character (Fal)',
@@ -120,7 +156,21 @@ export const imageModels: Record<string, TersaImageModel> = {
       },
     ],
     sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-    enabled: false, // ✅ Ativo
+    enabled: true, // ✅ Ativo
+  },
+  'kie-nano-banana': {
+    label: '🍌 Nano Banana (Kie.ai)',
+    chef: providers.kie,
+    providers: [
+      {
+        ...providers.kie,
+        model: kieAI.image('google/nano-banana'),
+        getCost: () => 0.03,
+      },
+    ],
+    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    priceIndicator: 'low',
+    enabled: true, // ✅ Ativo
   },
 };
 
@@ -130,21 +180,85 @@ export const imageModels: Record<string, TersaImageModel> = {
  */
 export const getEnabledImageModels = (): Record<string, TersaImageModel> => {
   try {
-    if (!imageModels || typeof imageModels !== 'object') {
-      console.error('imageModels is not properly initialized:', imageModels);
+    // Verificações de segurança mais robustas
+    if (!imageModels) {
+      console.error('imageModels is null or undefined');
       return {};
     }
 
-    const entries = Object.entries(imageModels);
+    if (typeof imageModels !== 'object') {
+      console.error('imageModels is not an object:', typeof imageModels);
+      return {};
+    }
+
+    // Debug: Log all models
+    console.log('[getEnabledImageModels] Total models:', Object.keys(imageModels).length);
+    console.log('[getEnabledImageModels] Model keys:', Object.keys(imageModels));
+
+    // Verificar se Object.entries está disponível
+    if (typeof Object.entries !== 'function') {
+      console.error('Object.entries is not available');
+      return {};
+    }
+
+    let entries;
+    try {
+      entries = Object.entries(imageModels);
+    } catch (entriesError) {
+      console.error('Error calling Object.entries:', entriesError);
+      return {};
+    }
+
     if (!Array.isArray(entries)) {
-      console.error('Object.entries(imageModels) did not return an array:', entries);
+      console.error('Object.entries did not return an array:', entries);
       return {};
     }
 
-    const filtered = entries.filter(([_, model]) => model?.enabled !== false);
+    // Filtrar com verificações de segurança
+    const filtered = entries.filter(([key, model]) => {
+      if (!key || typeof key !== 'string') {
+        console.warn('Invalid model key:', key);
+        return false;
+      }
+
+      if (!model || typeof model !== 'object') {
+        console.warn('Invalid model object for key:', key);
+        return false;
+      }
+
+      // Modelo habilitado se enabled !== false (padrão é true)
+      const isEnabled = model.enabled !== false;
+
+      // Debug: Log each model's status
+      if (key.includes('nano-banana')) {
+        console.log(`[getEnabledImageModels] ${key}:`, {
+          label: model.label,
+          enabled: model.enabled,
+          isEnabled,
+        });
+      }
+
+      return isEnabled;
+    });
+
+    console.log('[getEnabledImageModels] Filtered models:', filtered.length);
+    console.log('[getEnabledImageModels] Filtered keys:', filtered.map(([key]) => key));
+
+    // Verificar se Object.fromEntries está disponível
+    if (typeof Object.fromEntries !== 'function') {
+      console.error('Object.fromEntries is not available');
+      // Fallback manual
+      const result: Record<string, TersaImageModel> = {};
+      filtered.forEach(([key, model]) => {
+        result[key] = model;
+      });
+      return result;
+    }
+
     return Object.fromEntries(filtered);
   } catch (error) {
-    console.error('Error in getEnabledImageModels:', error);
+    console.error('Unexpected error in getEnabledImageModels:', error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
     return {};
   }
 };

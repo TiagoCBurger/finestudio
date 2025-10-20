@@ -94,49 +94,32 @@ const _generateImageAction = async ({
 
       // Rastreamento de créditos removido
 
-      image = generatedImageResponse.image;
-
       // Try to get response headers if available
       responseHeaders = (generatedImageResponse as any).response?.headers || {};
 
-      // Tentar obter do providerMetadata
-      const falMetadata = (generatedImageResponse as any).providerMetadata?.fal;
-      if (falMetadata) {
-        responseHeaders = {
-          'x-fal-request-id': falMetadata.requestId,
-          'x-fal-status': falMetadata.status,
+      // Verificar se está em modo webhook ANTES de tentar acessar image
+      const isPending = responseHeaders['x-fal-status'] === 'pending';
+
+      if (isPending) {
+        return {
+          nodeData: {
+            generated: {
+              url: '', // URL vazia, será preenchida pelo webhook
+              type: 'image/png',
+              headers: responseHeaders,
+            },
+            loading: true, // Flag para manter loading state
+            updatedAt: new Date().toISOString(),
+          },
         };
       }
-    }
 
-    // Se está em modo pending (webhook), retornar imediatamente sem processar
-    const isPending = responseHeaders['x-fal-status'] === 'pending';
+      // Só acessar image se não estiver em modo pending
+      image = generatedImageResponse.image;
 
-    console.log('Checking pending status:', {
-      isPending,
-      hasHeaders: !!responseHeaders,
-      falStatus: responseHeaders['x-fal-status'],
-      falRequestId: responseHeaders['x-fal-request-id'],
-      hasImage: !!image,
-    });
-
-    if (isPending) {
-      console.log('✅ Image generation pending, returning placeholder for webhook polling');
-
-      return {
-        nodeData: {
-          generated: {
-            url: '', // URL vazia, será preenchida pelo webhook
-            type: 'image/png',
-            headers: responseHeaders,
-          },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-
-    if (!image) {
-      throw new Error('No image generated');
+      if (!image) {
+        throw new Error('No image generated');
+      }
     }
 
     let extension = image.mediaType.split('/').pop();

@@ -7,13 +7,15 @@ import { Panel } from '@xyflow/react';
 import { CheckIcon, Loader2Icon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
-const getFormattedTime = (date: Date | undefined) => {
+const getFormattedTime = (date: Date | string | undefined | null) => {
   if (!date) {
     return 'Never';
   }
 
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+
   let unit: Intl.RelativeTimeFormatUnit = 'seconds';
-  let value = Math.round((date.getTime() - Date.now()) / 1000);
+  let value = Math.round((dateObj.getTime() - Date.now()) / 1000);
   const absoluteValue = Math.abs(value);
 
   if (absoluteValue > 60) {

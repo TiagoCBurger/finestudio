@@ -12,15 +12,27 @@ export const getTextFromTextNodes = (nodes: Node[]) => {
     return [];
   }
 
-  const sourceTexts = nodes
-    .filter((node) => node.type === 'text')
-    .map((node) => (node.data as TextNodeProps['data']).text);
+  try {
+    const sourceTexts = nodes
+      .filter((node) => node.type === 'text' && node.data)
+      .map((node) => {
+        const data = node.data as TextNodeProps['data'];
+        return data?.text;
+      });
 
-  const generatedTexts = nodes
-    .filter((node) => node.type === 'text' && node.data.generated)
-    .map((node) => (node.data as TextNodeProps['data']).generated?.text);
+    const generatedTexts = nodes
+      .filter((node) => node.type === 'text' && node.data?.generated)
+      .map((node) => {
+        const data = node.data as TextNodeProps['data'];
+        return data?.generated?.text;
+      });
 
-  return [...sourceTexts, ...generatedTexts].filter(Boolean) as string[];
+    return [...sourceTexts, ...generatedTexts].filter(Boolean) as string[];
+  } catch (error) {
+    console.error('Error in getTextFromTextNodes:', error);
+    console.error('Problematic nodes:', nodes);
+    return [];
+  }
 };
 
 export const getTranscriptionFromAudioNodes = (nodes: Node[]) => {
@@ -29,12 +41,21 @@ export const getTranscriptionFromAudioNodes = (nodes: Node[]) => {
     return [];
   }
 
-  const transcripts = nodes
-    .filter((node) => node.type === 'audio')
-    .map((node) => (node.data as AudioNodeProps['data']).transcript)
-    .filter(Boolean) as string[];
+  try {
+    const transcripts = nodes
+      .filter((node) => node.type === 'audio' && node.data)
+      .map((node) => {
+        const data = node.data as AudioNodeProps['data'];
+        return data?.transcript;
+      })
+      .filter(Boolean) as string[];
 
-  return transcripts;
+    return transcripts;
+  } catch (error) {
+    console.error('Error in getTranscriptionFromAudioNodes:', error);
+    console.error('Problematic nodes:', nodes);
+    return [];
+  }
 };
 
 export const getDescriptionsFromImageNodes = (nodes: Node[]) => {
@@ -43,12 +64,21 @@ export const getDescriptionsFromImageNodes = (nodes: Node[]) => {
     return [];
   }
 
-  const descriptions = nodes
-    .filter((node) => node.type === 'image')
-    .map((node) => (node.data as ImageNodeProps['data']).description)
-    .filter(Boolean) as string[];
+  try {
+    const descriptions = nodes
+      .filter((node) => node.type === 'image' && node.data)
+      .map((node) => {
+        const data = node.data as ImageNodeProps['data'];
+        return data?.description;
+      })
+      .filter(Boolean) as string[];
 
-  return descriptions;
+    return descriptions;
+  } catch (error) {
+    console.error('Error in getDescriptionsFromImageNodes:', error);
+    console.error('Problematic nodes:', nodes);
+    return [];
+  }
 };
 
 export const getImagesFromImageNodes = (nodes: Node[]) => {
@@ -57,17 +87,29 @@ export const getImagesFromImageNodes = (nodes: Node[]) => {
     return [];
   }
 
-  const sourceImages = nodes
-    .filter((node) => node.type === 'image')
-    .map((node) => (node.data as ImageNodeProps['data']).content)
-    .filter(Boolean) as { url: string; type: string }[];
+  try {
+    const sourceImages = nodes
+      .filter((node) => node.type === 'image' && node.data)
+      .map((node) => {
+        const data = node.data as ImageNodeProps['data'];
+        return data?.content;
+      })
+      .filter(Boolean) as { url: string; type: string }[];
 
-  const generatedImages = nodes
-    .filter((node) => node.type === 'image')
-    .map((node) => (node.data as ImageNodeProps['data']).generated)
-    .filter(Boolean) as { url: string; type: string }[];
+    const generatedImages = nodes
+      .filter((node) => node.type === 'image' && node.data)
+      .map((node) => {
+        const data = node.data as ImageNodeProps['data'];
+        return data?.generated;
+      })
+      .filter(Boolean) as { url: string; type: string }[];
 
-  return [...sourceImages, ...generatedImages];
+    return [...sourceImages, ...generatedImages];
+  } catch (error) {
+    console.error('Error in getImagesFromImageNodes:', error);
+    console.error('Problematic nodes:', nodes);
+    return [];
+  }
 };
 
 export const isValidSourceTarget = (source: Node, target: Node) => {

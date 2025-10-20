@@ -210,27 +210,20 @@ export const falAIServer = {
                     .set({ requestId: request_id })
                     .where(eq(falJobs.id, jobId));
 
-                console.log('Job updated with real request_id, waiting for webhook...');
-
-                // IMPORTANTE: Retornar um objeto que o AI SDK NÃO vai processar
-                // Usamos um símbolo especial para indicar modo webhook
-                const pendingResult = {
-                    image: {
-                        base64: '',
-                        uint8Array: new Uint8Array(0),
-                        mediaType: 'image/png' as const,
+                // IMPORTANTE: Retornar estrutura compatível com AI SDK
+                // O AI SDK espera pelo menos uma imagem, então retornamos um placeholder vazio
+                return {
+                    images: [new Uint8Array(0)], // Placeholder vazio para indicar modo webhook
+                    warnings: [],
+                    response: {
+                        timestamp: new Date(),
+                        modelId,
+                        headers: {
+                            'x-fal-request-id': request_id,
+                            'x-fal-status': 'pending',
+                        },
                     },
-                    // Adicionar flag especial para indicar modo webhook
-                    _webhookMode: true,
-                    _requestId: request_id,
-                } as any;
-
-                console.log('✅ Returning webhook mode result:', {
-                    requestId: request_id,
-                    webhookMode: true,
-                });
-
-                return pendingResult;
+                };
             }
 
             // ⚠️ MODO FALLBACK (apenas desenvolvimento sem webhook)

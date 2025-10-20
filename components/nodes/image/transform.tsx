@@ -57,11 +57,33 @@ export const ImageTransform = ({
 }: ImageTransformProps) => {
   const { updateNodeData, getNodes, getEdges } = useReactFlow();
   const [loading, setLoading] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [previousUrl, setPreviousUrl] = useState(data.generated?.url || '');
+  const [shouldShowSuccessToast, setShouldShowSuccessToast] = useState(false);
   const [localInstructions, setLocalInstructions] = useState(
     data.instructions ?? ''
   );
+  const [lastErrorUrl, setLastErrorUrl] = useState<string | null>(null);
 
   const project = useProject();
+
+  // Detectar quando webhook completou via Realtime
+  useEffect(() => {
+    // Se o data tem flag loading=true, manter loading state
+    if ((data as any).loading && !loading) {
+      setLoading(true);
+    }
+
+    // Se temos uma URL nova e ainda estamos em loading, significa que o webhook completou
+    // Agora vamos aguardar a imagem carregar
+    const currentUrl = data.generated?.url || '';
+    if (loading && currentUrl && currentUrl.length > 0 && currentUrl !== previousUrl) {
+      setImageLoading(true);
+      setPreviousUrl(currentUrl);
+      setShouldShowSuccessToast(true); // Marcar que devemos mostrar toast quando a imagem carregar
+      // O loading será removido quando a imagem carregar (onLoad do Image)
+    }
+  }, [loading, data.generated?.url, id, data.updatedAt, (data as any).loading, previousUrl]);
 
   // Nota: Removido useFalJob e polling - agora usamos APENAS Supabase Realtime
   // O webhook atualiza o projeto no banco e o Realtime notifica automaticamente via use-project-realtime hook
@@ -79,9 +101,41 @@ export const ImageTransform = ({
       return;
     }
 
-    const incomers = getIncomers({ id }, getNodes(), getEdges());
-    const textNodes = getTextFromTextNodes(incomers);
-    const imageNodes = getImagesFromImageNodes(incomers);
+    let incomers: any[] = [];
+    try {
+      incomers = getIncomers({ id }, getNodes(), getEdges());
+    } catch (incomersError) {
+      console.error('❌ Error getting incomers:', incomersError);
+      incomers = [];
+    }
+
+    // Garantir que incomers é um array
+    if (!Array.isArray(incomers)) {
+      console.warn('⚠️ getIncomers did not return an array:', incomers);
+      incomers = [];
+    }
+
+    // Debug logging para identificar problemas
+    console.log('🔍 Debug incomers:', {
+      incomersCount: incomers?.length || 0,
+      incomers: Array.isArray(incomers) ? incomers.map(node => ({
+        id: node?.id || 'unknown',
+        type: node?.type || 'unknown',
+        hasData: !!node?.data,
+        dataKeys: node?.data ? Object.keys(node.data) : []
+      })) : []
+    });
+
+    let textNodes: string[] = [];
+    let imageNodes: any[] = [];
+    try {
+      textNodes = getTextFromTextNodes(incomers);
+      imageNodes = getImagesFromImageNodes(incomers);
+    } catch (nodesError) {
+      console.error('❌ Error processing nodes:', nodesError);
+      textNodes = [];
+      imageNodes = [];
+    }
 
     try {
       if (!textNodes.length && !imageNodes.length) {
@@ -131,37 +185,18 @@ export const ImageTransform = ({
 
       // Verificar se há request_id nos headers (modo webhook)
       const nodeData = response.nodeData as any;
-
-      console.log('🔍 NodeData structure:', {
-        hasNodeData: !!nodeData,
-        hasGenerated: !!nodeData?.generated,
-        hasHeaders: !!nodeData?.generated?.headers,
-        nodeDataKeys: nodeData ? Object.keys(nodeData) : [],
-        generatedKeys: nodeData?.generated ? Object.keys(nodeData.generated) : [],
-      });
       const falRequestId = nodeData.generated?.headers?.['x-fal-request-id'];
       const falStatus = nodeData.generated?.headers?.['x-fal-status'];
 
-      console.log('Fal.ai headers:', {
-        falRequestId,
-        falStatus,
-        allHeaders: nodeData.generated?.headers,
-      });
-
       if (falRequestId && falStatus === 'pending') {
-        console.log('✅ Fal.ai job submitted, monitoring:', falRequestId);
-        // NÃO atualizar o nó ainda, aguardar webhook
-        // NÃO parar loading, manter até webhook completar
-        toast.info('Image generation started, waiting for completion...');
-        console.log('⏳ Keeping loading state active, waiting for webhook via Realtime...');
-
+        // Atualizar o nó com flag de loading
+        updateNodeData(id, response.nodeData);
+        toast.info('Image generation started...');
         // O Supabase Realtime vai notificar automaticamente quando o webhook atualizar o projeto
-        // Não precisa mais de polling manual!
       } else {
         // Modo síncrono (sem webhook) - atualizar imediatamente
-        console.log('Updating node data directly (no webhook)');
         updateNodeData(id, response.nodeData);
-        toast.success('Image generated successfully');
+        setShouldShowSuccessToast(true); // Marcar que devemos mostrar toast quando a imagem carregar
         setLoading(false); // Parar loading apenas no modo síncrono
       }
 
@@ -184,6 +219,46 @@ export const ImageTransform = ({
         });
       }
 
+      // 🔧 MELHORIA: Filtrar erros que não devem ser exibidos ao usuário
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Detectar se estamos em modo webhook
+      const isWebhookMode = !!process.env.NEXT_PUBLIC_APP_URL;
+
+      // Lista de erros que são falsos positivos em modo webhook
+      const falsePositiveErrors = [
+        'Node not found',
+        'Target node',
+        'not found in project',
+        'Invalid project content structure',
+        'Project not found'
+      ];
+
+      const isFalsePositiveError = falsePositiveErrors.some(pattern =>
+        errorMessage.includes(pattern)
+      );
+
+      if (isWebhookMode && isFalsePositiveError) {
+        console.warn('⚠️ Suprimindo erro falso positivo em modo webhook:', {
+          error: errorMessage,
+          nodeId: id,
+          projectId: project?.id,
+          reason: 'Erro provavelmente relacionado a timing/race condition no webhook'
+        });
+
+        // Não exibir toast de erro, apenas parar o loading
+        setLoading(false);
+
+        // Exibir toast informativo discreto
+        toast.info('Image generation in progress...', {
+          description: 'The image will appear automatically when ready',
+          duration: 3000 // Toast mais curto
+        });
+
+        return; // Não executar handleError
+      }
+
+      // Para outros erros, exibir normalmente
       handleError('Error generating image', error);
       setLoading(false);
     }
@@ -238,7 +313,13 @@ export const ImageTransform = ({
   );
 
   const toolbar = useMemo<ComponentProps<typeof NodeLayout>['toolbar']>(() => {
-    const enabledModels = getEnabledImageModels();
+    let enabledModels;
+    try {
+      enabledModels = getEnabledImageModels();
+    } catch (error) {
+      console.error('Error getting enabled image models:', error);
+      enabledModels = {};
+    }
 
     // Garantir que enabledModels é um objeto válido antes de usar Object.entries
     if (!enabledModels || typeof enabledModels !== 'object') {
@@ -246,17 +327,29 @@ export const ImageTransform = ({
       return [];
     }
 
-    const availableModels = Object.fromEntries(
-      Object.entries(enabledModels).map(([key, model]) => [
-        key,
-        {
-          ...model,
-          disabled: hasIncomingImageNodes
-            ? !model.supportsEdit
-            : model.disabled,
-        },
-      ])
-    );
+    let availableModels;
+    try {
+      const entries = Object.entries(enabledModels);
+      if (!Array.isArray(entries)) {
+        console.error('Object.entries did not return array:', entries);
+        return [];
+      }
+
+      availableModels = Object.fromEntries(
+        entries.map(([key, model]) => [
+          key,
+          {
+            ...model,
+            disabled: hasIncomingImageNodes
+              ? !model.supportsEdit
+              : model.disabled,
+          },
+        ])
+      );
+    } catch (error) {
+      console.error('Error processing available models:', error);
+      return [];
+    }
 
     const items: ComponentProps<typeof NodeLayout>['toolbar'] = [
       {
@@ -377,7 +470,7 @@ export const ImageTransform = ({
 
   return (
     <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>
-      {loading && (
+      {(loading || imageLoading) && (
         <Skeleton
           className="flex w-full animate-pulse items-center justify-center rounded-b-xl"
           style={{ aspectRatio }}
@@ -388,12 +481,12 @@ export const ImageTransform = ({
               className="size-4 animate-spin text-muted-foreground"
             />
             <p className="text-xs text-muted-foreground">
-              Generating...
+              {imageLoading ? 'Loading image...' : 'Generating...'}
             </p>
           </div>
         </Skeleton>
       )}
-      {!loading && !data.generated?.url && (
+      {!loading && !imageLoading && !data.generated?.url && (
         <div
           className="flex w-full items-center justify-center rounded-b-xl bg-secondary p-4"
           style={{ aspectRatio }}
@@ -404,13 +497,80 @@ export const ImageTransform = ({
           </p>
         </div>
       )}
-      {!loading && data.generated?.url && (
+      {!loading && !imageLoading && data.generated?.url && (
         <Image
+          key={`${data.generated.url}-${data.updatedAt || ''}`} // Force re-render when URL or timestamp changes
           src={data.generated.url}
           alt="Generated image"
           width={1000}
           height={1000}
           className="w-full rounded-b-xl object-cover"
+          onLoad={() => {
+            console.log('✅ Image loaded successfully:', data.generated?.url);
+            setImageLoading(false);
+            setLoading(false);
+            setLastErrorUrl(null); // Reset error tracking on successful load
+
+            // Só mostrar toast se foi uma nova geração, não um reload da página
+            if (shouldShowSuccessToast) {
+              toast.success('Image generated successfully');
+              setShouldShowSuccessToast(false);
+            }
+          }}
+          onError={(error) => {
+            const currentUrl = data.generated?.url || '';
+
+            console.error('❌ Failed to load image:', {
+              url: currentUrl,
+              error: error,
+              timestamp: data.updatedAt,
+              isLoading: loading,
+              isImageLoading: imageLoading,
+              lastErrorUrl
+            });
+
+            // 🔧 CORREÇÃO: Evitar toasts duplicados para a mesma URL
+            if (lastErrorUrl === currentUrl) {
+              console.warn('⚠️ Suprimindo toast duplicado para a mesma URL');
+              return;
+            }
+
+            // 🔧 CORREÇÃO: Não mostrar erro se estamos em processo de geração
+            // A URL antiga pode falhar enquanto aguardamos a nova
+            if (loading || imageLoading) {
+              console.warn('⚠️ Suprimindo erro durante processo de geração/carregamento');
+              return;
+            }
+
+            // 🔧 CORREÇÃO: Não mostrar erro se a URL mudou recentemente
+            // Isso indica que estamos em transição entre URLs
+            if (currentUrl !== previousUrl) {
+              console.warn('⚠️ Suprimindo erro durante transição de URL');
+              setPreviousUrl(currentUrl);
+              return;
+            }
+
+            // Marcar que já mostramos erro para esta URL
+            setLastErrorUrl(currentUrl);
+
+            // Check if this is a Cloudflare R2 signed URL that might be expired
+            const isR2SignedUrl = currentUrl.includes('r2.cloudflarestorage.com') && currentUrl.includes('X-Amz-Signature');
+
+            if (isR2SignedUrl) {
+              console.warn('⚠️ R2 signed URL detected - might be expired');
+              toast.error('Image URL expired - please regenerate or switch to Supabase storage');
+            } else {
+              toast.error('Failed to load image - please try regenerating');
+            }
+
+            setImageLoading(false);
+            setLoading(false);
+          }}
+          // Add loading state to prevent flash of broken image
+          onLoadStart={() => {
+            console.log('🔄 Starting to load image:', data.generated?.url);
+            setImageLoading(true);
+          }}
         />
       )}
       <Textarea

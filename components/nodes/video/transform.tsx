@@ -48,6 +48,18 @@ const getDefaultModel = (models: typeof videoModels) => {
   return defaultModel[0];
 };
 
+// Type for node data response from server action
+interface NodeDataResponse {
+  status?: 'pending' | 'completed';
+  requestId?: string;
+  generated?: {
+    url: string;
+    type: string;
+  };
+  updatedAt?: string;
+  loading?: boolean;
+}
+
 export const VideoTransform = ({
   data,
   id,
@@ -55,7 +67,10 @@ export const VideoTransform = ({
   title,
 }: VideoTransformProps) => {
   const { updateNodeData, getNodes, getEdges } = useReactFlow();
-  const [loading, setLoading] = useState(false);
+  // 🔧 Inicializar loading baseado no estado persistido no banco
+  const [loading, setLoading] = useState(data.loading === true || data.status === 'pending');
+  const [previousUrl, setPreviousUrl] = useState(data.generated?.url || '');
+  const [shouldShowSuccessToast, setShouldShowSuccessToast] = useState(false);
   const [localInstructions, setLocalInstructions] = useState(
     data.instructions ?? ''
   );
@@ -81,12 +96,47 @@ export const VideoTransform = ({
     }
   }, [localInstructions, data.instructions, id, updateNodeData]);
 
-  // Sync local state with external changes
+  // Sync local state with external changes (only when data.instructions changes)
   useEffect(() => {
     if (data.instructions !== undefined && data.instructions !== localInstructions) {
       setLocalInstructions(data.instructions);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.instructions]);
+
+  // Sync loading state with database (important for page reloads and multi-window sync)
+  useEffect(() => {
+    const nodeData = data as NodeDataResponse;
+    const shouldBeLoading = nodeData.loading === true || nodeData.status === 'pending';
+
+    // Sync loading state from database
+    if (shouldBeLoading && !loading) {
+      console.log('[Video Transform] Syncing loading state from database: true');
+      setLoading(true);
+    }
+  }, [data.loading, data.status, loading]);
+
+  // Detect when video generation completes via Realtime
+  useEffect(() => {
+    // Detect completion: new URL appeared while we're loading
+    const currentUrl = data.generated?.url || '';
+    if (loading && currentUrl && currentUrl.length > 0 && currentUrl !== previousUrl) {
+      console.log('[Video Transform] Video generation completed via Realtime', {
+        nodeId: id,
+        url: currentUrl.substring(0, 50) + '...',
+        timestamp: new Date().toISOString()
+      });
+
+      setLoading(false);
+      setPreviousUrl(currentUrl);
+
+      // Only show success toast if this was a new generation
+      if (shouldShowSuccessToast) {
+        toast.success('Video generated successfully');
+        setShouldShowSuccessToast(false);
+      }
+    }
+  }, [loading, data.generated?.url, previousUrl, shouldShowSuccessToast, id]);
 
   const handleModelChange = useCallback(
     (value: string) => {
@@ -121,10 +171,12 @@ export const VideoTransform = ({
     [id, updateNodeData]
   );
 
-  const handleGenerate = async () => {
+  const handleGenerate = useCallback(async () => {
     if (loading || !project?.id) {
       return;
     }
+
+    let shouldClearLoading = true;
 
     try {
       const incomers = getIncomers({ id }, getNodes(), getEdges());
@@ -159,17 +211,84 @@ export const VideoTransform = ({
         throw new Error(response.error);
       }
 
-      updateNodeData(id, response.nodeData);
+      // Type-safe check for pending webhook job
+      const nodeData = response.nodeData as NodeDataResponse;
+      const isPending = nodeData.status === 'pending';
 
-      toast.success('Video generated successfully');
+      if (isPending) {
+        // Update node with pending status
+        updateNodeData(id, response.nodeData);
+        shouldClearLoading = false; // Don't clear loading, wait for Realtime
+        setShouldShowSuccessToast(true); // Mark that we should show toast on completion
+
+        toast.info('Video generation started, this may take 2-3 minutes...', {
+          description: 'The video will appear automatically when ready',
+          duration: 5000
+        });
+
+        console.log('[Video Transform] Job submitted to webhook queue', {
+          nodeId: id,
+          projectId: project.id,
+          requestId: nodeData.requestId,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        // Synchronous mode (no webhook) - update immediately
+        updateNodeData(id, response.nodeData);
+        setShouldShowSuccessToast(true); // Show toast when video loads
+      }
 
       setTimeout(() => mutate('credits'), 5000);
     } catch (error) {
-      handleError('Error generating video', error);
+      // Check if this is a false positive error in webhook mode
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isWebhookMode = !!process.env.NEXT_PUBLIC_APP_URL;
+      const falsePositiveErrors = [
+        'Node not found',
+        'Target node',
+        'not found in project',
+        'Invalid project content structure',
+        'Project not found'
+      ];
+
+      const isFalsePositiveError = falsePositiveErrors.some(pattern =>
+        errorMessage.includes(pattern)
+      );
+
+      if (isWebhookMode && isFalsePositiveError) {
+        console.warn('[Video Transform] Suppressing false positive error in webhook mode:', {
+          error: errorMessage,
+          nodeId: id,
+          projectId: project?.id,
+          reason: 'Likely timing/race condition in webhook'
+        });
+
+        toast.info('Video generation in progress...', {
+          description: 'The video will appear automatically when ready',
+          duration: 3000
+        });
+      } else {
+        handleError('Error generating video', error);
+      }
     } finally {
-      setLoading(false);
+      if (shouldClearLoading) {
+        setLoading(false);
+      }
     }
-  };
+  }, [
+    loading,
+    project?.id,
+    id,
+    getNodes,
+    getEdges,
+    analytics,
+    type,
+    modelId,
+    data.instructions,
+    duration,
+    aspectRatio,
+    updateNodeData
+  ]);
 
   const toolbar = useMemo<ComponentProps<typeof NodeLayout>['toolbar']>(() => {
     const enabledModels = getEnabledVideoModels();

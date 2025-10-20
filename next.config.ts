@@ -40,6 +40,11 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'pub-53e47c76330e4238bb188ab59c62bf82.r2.dev',
       },
+      // Cloudflare R2 storage - additional public endpoint
+      {
+        protocol: 'https',
+        hostname: 'pub-fc1a8343fa6d4aa485c79384d30027c5.r2.dev',
+      },
     ],
   },
 

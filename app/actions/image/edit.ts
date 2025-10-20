@@ -134,7 +134,7 @@ export const editImageAction = async ({
       // Rastreamento de créditos removido
 
       image = generatedImageResponse.image;
-      responseHeaders = generatedImageResponse.response?.headers || {};
+      responseHeaders = {};
     } else {
       const base64Image = await fetch(images[0].url)
         .then((res) => res.arrayBuffer())
@@ -179,43 +179,48 @@ Please analyze all the visual elements from the connected images and create a ha
 
       // Rastreamento de créditos removido
 
-      // Verificar se está em modo webhook (flag especial)
-      const isWebhookMode = (generatedImageResponse as any)._webhookMode;
-      const webhookRequestId = (generatedImageResponse as any)._requestId;
+      // Try to get response headers if available
+      responseHeaders = (generatedImageResponse as any).response?.headers || {};
 
-      console.log('📦 Generated image response:', {
+      // Verificar se está em modo webhook ANTES de tentar acessar image
+      const isPending = responseHeaders['x-fal-status'] === 'pending';
+
+      console.log('Checking pending status:', {
+        isPending,
+        hasHeaders: !!responseHeaders,
+        falStatus: responseHeaders['x-fal-status'],
+        falRequestId: responseHeaders['x-fal-request-id'],
         hasImage: !!generatedImageResponse.image,
-        isWebhookMode,
-        webhookRequestId,
       });
 
-      if (isWebhookMode && webhookRequestId) {
-        console.log('✅ Webhook mode detected, returning pending result');
+      if (isPending) {
+        console.log('✅ Image edit pending, returning placeholder for webhook polling');
 
         return {
           nodeData: {
             generated: {
               url: '', // URL vazia, será preenchida pelo webhook
               type: 'image/png',
-              headers: {
-                'x-fal-request-id': webhookRequestId,
-                'x-fal-status': 'pending',
-              },
+              headers: responseHeaders,
             },
+            loading: true, // Flag para manter loading state
             updatedAt: new Date().toISOString(),
             description: instructions ?? defaultPrompt,
           },
         };
       }
 
+      // Só acessar image se não estiver em modo pending
       image = generatedImageResponse.image;
-      responseHeaders = generatedImageResponse.response?.headers || {};
+
+      if (!image) {
+        // Se não tem imagem E não está pending, algo deu errado
+        console.error('No image generated and not in pending state');
+        throw new Error('No image generated');
+      }
     }
 
-    if (!image) {
-      throw new Error('No image generated');
-    }
-
+    // Continuar com processamento normal (modo síncrono)
     const bytes = Buffer.from(image.base64, 'base64');
     const contentType = 'image/png';
 
@@ -232,6 +237,8 @@ Please analyze all the visual elements from the connected images and create a ha
     const { data: downloadUrl } = client.storage
       .from('files')
       .getPublicUrl(blob.data.path);
+
+    const finalUrl = downloadUrl.publicUrl;
 
     const project = await database.query.projects.findFirst({
       where: eq(projects.id, projectId),
@@ -261,9 +268,8 @@ Please analyze all the visual elements from the connected images and create a ha
       ...(existingNode.data ?? {}),
       updatedAt: new Date().toISOString(),
       generated: {
-        url: downloadUrl.publicUrl,
+        url: finalUrl,
         type: contentType,
-        // Incluir headers da resposta (para webhook polling)
         headers: responseHeaders,
       },
       description: instructions ?? defaultPrompt,

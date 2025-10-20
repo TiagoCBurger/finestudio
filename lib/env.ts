@@ -17,10 +17,7 @@ export const env = createEnv({
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     SUPABASE_AUTH_HOOK_SECRET: z.string().min(1).optional(),
 
-    // Storage Provider Configuration
-    STORAGE_PROVIDER: z.enum(['r2', 'supabase']).optional().default('r2'),
-
-    // Cloudflare R2 Configuration (required when STORAGE_PROVIDER=r2)
+    // Cloudflare R2 Configuration
     R2_ACCOUNT_ID: z.string().min(1).optional(),
     R2_ACCESS_KEY_ID: z.string().min(1).optional(),
     R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
@@ -29,6 +26,9 @@ export const env = createEnv({
 
     // Fal.ai (Obrigatório)
     FAL_API_KEY: z.string().min(1),
+
+    // Kie.ai (Opcional)
+    KIE_API_KEY: z.string().min(1).optional(),
 
     // Opcional - Outros providers de IA
     OPENAI_API_KEY: z.string().min(1).startsWith('sk-').optional(),
@@ -74,8 +74,7 @@ export const env = createEnv({
     // Stripe removido
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_AUTH_HOOK_SECRET: process.env.SUPABASE_AUTH_HOOK_SECRET,
-    // Storage Provider
-    STORAGE_PROVIDER: process.env.STORAGE_PROVIDER,
+    // R2 Storage
     R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
     R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
@@ -88,6 +87,7 @@ export const env = createEnv({
     HUME_API_KEY: process.env.HUME_API_KEY,
     LMNT_API_KEY: process.env.LMNT_API_KEY,
     FAL_API_KEY: process.env.FAL_API_KEY,
+    KIE_API_KEY: process.env.KIE_API_KEY,
     AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
   },
 });

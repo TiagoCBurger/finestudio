@@ -16,6 +16,7 @@ import {
   GroqIcon,
   HumeIcon,
   InceptionIcon,
+  KieIcon,
   KlingIcon,
   LmntIcon,
   LumaIcon,
@@ -212,6 +213,16 @@ export const providers = {
     id: 'novita',
     name: 'Novita',
     icon: NovitaIcon,
+  },
+  kie: {
+    id: 'kie',
+    name: 'Kie.ai',
+    icon: KieIcon,
+  },
+  mock: {
+    id: 'mock',
+    name: 'Mock (Teste)',
+    icon: UnknownIcon,
   },
   unknown: {
     id: 'unknown',

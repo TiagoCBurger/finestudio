@@ -3,20 +3,39 @@ import {
     type TersaProvider,
     providers,
 } from '@/lib/providers';
+import type { PriceBracket } from '@/providers/gateway/client';
 import type { ImageModel } from 'ai';
 import { falAIServer } from './fal.server';
+import { kieAIServer } from './kie.server';
 
+/**
+ * Image size format: width x height in pixels
+ * @example '1024x1024', '768x1024'
+ */
 export type ImageSize = `${number}x${number}`;
 
+/**
+ * Cost calculation parameters for image generation
+ */
+export interface CostCalculationParams {
+    textInput?: number;
+    imageInput?: number;
+    output?: number;
+    size?: string;
+}
+
+/**
+ * Extended Tersa model with image-specific properties
+ */
 type TersaImageModel = TersaModel & {
     providers: (TersaProvider & {
         model: ImageModel;
-        getCost: (props?: {
-            textInput?: number;
-            imageInput?: number;
-            output?: number;
-            size?: string;
-        }) => number;
+        /**
+         * Calculate cost in credits for this model
+         * @param props - Optional parameters affecting cost calculation
+         * @returns Cost in credits
+         */
+        getCost: (props?: CostCalculationParams) => number;
     })[];
     sizes?: ImageSize[];
     supportsEdit?: boolean;
@@ -24,88 +43,142 @@ type TersaImageModel = TersaModel & {
     enabled?: boolean;
 };
 
+/**
+ * Standard image sizes supported by most models
+ */
+const STANDARD_IMAGE_SIZES: ImageSize[] = ['1024x1024', '768x1024', '1024x768', '512x512'];
+
+/**
+ * Helper to create a Fal AI image model configuration
+ */
+function createFalImageModel(
+    modelId: Parameters<typeof falAIServer.image>[0],
+    config: {
+        label: string;
+        cost: number;
+        supportsEdit?: boolean;
+        enabled?: boolean;
+        priceIndicator?: PriceBracket;
+        isDefault?: boolean;
+        sizes?: ImageSize[];
+    }
+): TersaImageModel {
+    const model: TersaImageModel = {
+        label: config.label,
+        chef: providers.fal,
+        providers: [
+            {
+                ...providers.fal,
+                model: falAIServer.image(modelId),
+                getCost: () => config.cost,
+            },
+        ],
+        sizes: config.sizes ?? STANDARD_IMAGE_SIZES,
+        supportsEdit: config.supportsEdit ?? false,
+        enabled: config.enabled ?? true,
+    };
+
+    if (config.priceIndicator) {
+        model.priceIndicator = config.priceIndicator;
+    }
+
+    if (config.isDefault) {
+        model.default = true;
+    }
+
+    return model;
+}
+
+/**
+ * Helper to create a Kie AI image model configuration
+ */
+function createKieImageModel(
+    modelId: Parameters<typeof kieAIServer.image>[0],
+    config: {
+        label: string;
+        cost: number;
+        enabled?: boolean;
+        priceIndicator?: PriceBracket;
+        sizes?: ImageSize[];
+    }
+): TersaImageModel {
+    const model: TersaImageModel = {
+        label: config.label,
+        chef: providers.kie,
+        providers: [
+            {
+                ...providers.kie,
+                model: kieAIServer.image(modelId),
+                getCost: () => config.cost,
+            },
+        ],
+        sizes: config.sizes ?? STANDARD_IMAGE_SIZES,
+        enabled: config.enabled ?? true,
+    };
+
+    if (config.priceIndicator) {
+        model.priceIndicator = config.priceIndicator;
+    }
+
+    return model;
+}
+
+/**
+ * Server-side image model configurations
+ * 
+ * Each model includes:
+ * - Provider configuration (Fal AI, Kie AI, etc.)
+ * - Cost calculation (in credits)
+ * - Supported image sizes
+ * - Edit capabilities
+ * - Enabled/disabled state
+ * 
+ * @example
+ * ```typescript
+ * const model = imageModelsServer['fal-nano-banana'];
+ * const cost = model.providers[0].getCost();
+ * ```
+ */
 export const imageModelsServer: Record<string, TersaImageModel> = {
-    'fal-nano-banana': {
+    'fal-nano-banana': createFalImageModel('fal-ai/nano-banana/edit', {
         label: '🍌 Nano Banana',
-        chef: providers.unknown,
-        providers: [
-            {
-                ...providers.unknown,
-                model: falAIServer.image('fal-ai/nano-banana/edit'),
-                getCost: () => 2,
-            },
-        ],
-        sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+        cost: 2,
+        supportsEdit: true,
         priceIndicator: 'low',
-        supportsEdit: true,
-        default: true,
-        enabled: true,
-    },
-    'fal-flux-dev-image-to-image': {
+        isDefault: true,
+    }),
+
+    'fal-flux-dev-image-to-image': createFalImageModel('fal-ai/flux/dev/image-to-image', {
         label: 'FLUX Dev Image-to-Image (Fal)',
-        chef: providers.fal,
-        providers: [
-            {
-                ...providers.fal,
-                model: falAIServer.image('fal-ai/flux/dev/image-to-image'),
-                getCost: () => 0.025,
-            },
-        ],
-        sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+        cost: 0.025,
         supportsEdit: true,
-        enabled: false,
-    },
-    'fal-gpt-image-edit': {
+    }),
+
+    'fal-gpt-image-edit': createFalImageModel('fal-ai/gpt-image-1/edit-image/byok', {
         label: 'GPT Image Edit (BYOK)',
-        chef: providers.fal,
-        providers: [
-            {
-                ...providers.fal,
-                model: falAIServer.image('fal-ai/gpt-image-1/edit-image/byok'),
-                getCost: () => 0.02,
-            },
-        ],
-        sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+        cost: 0.02,
         supportsEdit: true,
         enabled: false,
-    },
-    'fal-flux-pro-kontext': {
+    }),
+
+    'fal-flux-pro-kontext': createFalImageModel('fal-ai/flux-pro/kontext', {
         label: 'FLUX Pro Kontext (Fal)',
-        chef: providers.fal,
-        providers: [
-            {
-                ...providers.fal,
-                model: falAIServer.image('fal-ai/flux-pro/kontext'),
-                getCost: () => 0.055,
-            },
-        ],
-        sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-        enabled: false,
-    },
-    'fal-flux-pro-kontext-max-multi': {
+        cost: 0.055,
+    }),
+
+    'fal-flux-pro-kontext-max-multi': createFalImageModel('fal-ai/flux-pro/kontext/max/multi', {
         label: 'FLUX Pro Kontext Max Multi (Fal)',
-        chef: providers.fal,
-        providers: [
-            {
-                ...providers.fal,
-                model: falAIServer.image('fal-ai/flux-pro/kontext/max/multi'),
-                getCost: () => 0.06,
-            },
-        ],
-        sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-        enabled: false,
-    },
-    'fal-ideogram-character': {
+        cost: 0.06,
+    }),
+
+    'fal-ideogram-character': createFalImageModel('fal-ai/ideogram/character', {
         label: 'Ideogram Character (Fal)',
-        chef: providers.fal,
-        providers: [
-            {
-                ...providers.fal,
-                model: falAIServer.image('fal-ai/ideogram/character'),
-                getCost: () => 0.08,
-            },
-        ],
-        sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-        enabled: false,
-    },
+        cost: 0.08,
+    }),
+
+    'kie-nano-banana': createKieImageModel('google/nano-banana', {
+        label: '🍌 Nano Banana (Kie.ai)',
+        cost: 0.03,
+        priceIndicator: 'low',
+    }),
 };

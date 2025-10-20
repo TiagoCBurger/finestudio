@@ -56,8 +56,18 @@ export const createProjectAction = async (
 
     return { id: project[0].id };
   } catch (error) {
-    const message = parseError(error);
+    // Log the complete error for debugging
+    console.error('🔴 Project creation failed - FULL ERROR:', error);
+    console.error('🔴 Error details:', {
+      name,
+      message: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      stack: error instanceof Error ? error.stack : undefined,
+      cause: error instanceof Error ? error.cause : undefined,
+      timestamp: new Date().toISOString()
+    });
 
+    const message = parseError(error);
     return { error: message };
   }
 };

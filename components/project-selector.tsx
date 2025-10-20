@@ -51,7 +51,7 @@ export const ProjectSelector = ({
   const [isCreating, setIsCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const router = useRouter();
-  const user = useUser();
+  const { user } = useUser();
 
   const fuse = useMemo(
     () =>

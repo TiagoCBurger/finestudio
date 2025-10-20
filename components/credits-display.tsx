@@ -19,7 +19,7 @@ interface CreditBalance {
 }
 
 export const CreditsDisplay = () => {
-    const user = useUser();
+    const { user } = useUser();
     const [balance, setBalance] = useState<CreditBalance | null>(null);
     const [loading, setLoading] = useState(true);
 
@@ -66,10 +66,10 @@ export const CreditsDisplay = () => {
             <Tooltip>
                 <TooltipTrigger asChild>
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${isOutOfCredits
-                            ? 'bg-destructive text-destructive-foreground'
-                            : isLowCredits
-                                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                                : 'bg-muted hover:bg-muted/80'
+                        ? 'bg-destructive text-destructive-foreground'
+                        : isLowCredits
+                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                            : 'bg-muted hover:bg-muted/80'
                         }`}>
                         <CoinsIcon className="h-4 w-4" />
                         <span className="text-sm font-medium">

@@ -40,7 +40,7 @@ export const WelcomeDemo = ({ title, description }: WelcomeDemoProps) => {
   const [hasConnectedImageNode, setHasConnectedImageNode] = useState(false);
   const [hasImageInstructions, setHasImageInstructions] = useState(false);
   const [hasGeneratedImage, setHasGeneratedImage] = useState(false);
-  const user = useUser();
+  const { user } = useUser();
   const router = useRouter();
 
   useEffect(() => {

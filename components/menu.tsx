@@ -23,7 +23,7 @@ export const Menu = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const router = useRouter();
-  const user = useUser();
+  const { user, loading } = useUser();
   const { isSubscribed } = useSubscription();
 
   const logout = async () => {
@@ -42,7 +42,7 @@ export const Menu = () => {
     }, 200);
   };
 
-  if (!user) {
+  if (loading || !user) {
     return (
       <Button variant="ghost" size="icon" className="rounded-full" disabled>
         <Loader2 className="animate-spin" size={16} />
@@ -56,9 +56,9 @@ export const Menu = () => {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="rounded-full">
             <Avatar>
-              <AvatarImage src={user.user_metadata.avatar} />
+              <AvatarImage src={user.user_metadata?.avatar} />
               <AvatarFallback className="bg-primary text-primary-foreground uppercase">
-                {(user.user_metadata.name ?? user.email ?? user.id)
+                {(user.user_metadata?.name ?? user.email ?? user.id)
                   ?.split(' ')
                   .map((name: string) => name.at(0))
                   .join('')}
@@ -75,18 +75,18 @@ export const Menu = () => {
         >
           <DropdownMenuLabel>
             <Avatar>
-              <AvatarImage src={user.user_metadata.avatar} />
+              <AvatarImage src={user.user_metadata?.avatar} />
               <AvatarFallback className="bg-primary text-primary-foreground uppercase">
-                {(user.user_metadata.name ?? user.email ?? user.id)
+                {(user.user_metadata?.name ?? user.email ?? user.id)
                   ?.split(' ')
                   .map((name: string) => name.at(0))
                   .join('')}
               </AvatarFallback>
             </Avatar>
             <p className="mt-2 truncate">
-              {user.user_metadata.name ?? user.email ?? user.id}
+              {user.user_metadata?.name ?? user.email ?? user.id}
             </p>
-            {user.user_metadata.name && user.email && (
+            {user.user_metadata?.name && user.email && (
               <p className="truncate font-normal text-muted-foreground text-xs">
                 {user.email}
               </p>

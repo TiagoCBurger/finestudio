@@ -113,6 +113,8 @@ class R2StorageProvider implements StorageProvider {
                 url = `${this.publicUrl}/${key}`;
             } else {
                 // Generate a signed URL (works without public access)
+                // WARNING: Signed URLs expire and will cause "Failed to load image" errors
+                // For production, configure R2_PUBLIC_URL or enable public access on bucket
                 // Valid for 7 days (604800 seconds)
                 const getCommand = new GetObjectCommand({
                     Bucket: this.bucketName,
@@ -121,6 +123,8 @@ class R2StorageProvider implements StorageProvider {
                 url = await getSignedUrl(this.client, getCommand, {
                     expiresIn: 604800 // 7 days
                 });
+
+                console.warn('[R2 Storage] Using signed URL with 7-day expiration. Configure R2_PUBLIC_URL for permanent URLs.');
             }
 
             return {

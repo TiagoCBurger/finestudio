@@ -123,7 +123,7 @@ export const POST = async (req: Request) => {
             const storage = getStorageProvider();
 
             if (job.type === 'image' && result.images?.[0]?.url) {
-                console.log(`Uploading image to storage (${process.env.STORAGE_PROVIDER || 'r2'})...`);
+                console.log('Uploading image to R2 storage...');
 
                 try {
                     const imageUrl = result.images[0].url;
@@ -165,7 +165,7 @@ export const POST = async (req: Request) => {
                     // Continuar mesmo se upload falhar (usar URL temporária do fal.ai)
                 }
             } else if (job.type === 'video' && result.video?.url) {
-                console.log(`Uploading video to storage (${process.env.STORAGE_PROVIDER || 'r2'})...`);
+                console.log('Uploading video to R2 storage...');
 
                 try {
                     const videoUrl = result.video.url;
@@ -227,60 +227,147 @@ export const POST = async (req: Request) => {
                 const nodeId = jobInput?._metadata?.nodeId;
                 const projectId = jobInput?._metadata?.projectId;
 
+                console.log('🔍 Webhook project update metadata:', {
+                    hasJobInput: !!jobInput,
+                    nodeId,
+                    projectId,
+                    jobType: job.type,
+                    hasResult: !!result
+                });
+
                 if (nodeId && projectId) {
-                    console.log('Updating project node with permanent URL...');
+                    console.log('📝 Updating project node with permanent URL...');
 
                     const { projects } = await import('@/schema');
                     const project = await database.query.projects.findFirst({
                         where: eq(projects.id, projectId),
                     });
 
-                    if (project) {
-                        const content = project.content as {
-                            nodes: any[];
-                            edges: any[];
-                            viewport: any;
-                        };
-
-                        // Encontrar e atualizar o nó
-                        const updatedNodes = content.nodes.map((node: any) => {
-                            if (node.id === nodeId) {
-                                const imageUrl = job.type === 'image'
-                                    ? result.images?.[0]?.url
-                                    : result.video?.url;
-
-                                return {
-                                    ...node,
-                                    data: {
-                                        ...node.data,
-                                        generated: {
-                                            url: imageUrl,
-                                            type: job.type === 'image' ? 'image/png' : 'video/mp4',
-                                        },
-                                        updatedAt: new Date().toISOString(),
-                                    },
-                                };
-                            }
-                            return node;
-                        });
-
-                        // Salvar project atualizado
-                        await database
-                            .update(projects)
-                            .set({
-                                content: {
-                                    ...content,
-                                    nodes: updatedNodes,
-                                },
-                            })
-                            .where(eq(projects.id, projectId));
-
-                        console.log('Project node updated successfully');
+                    if (!project) {
+                        console.warn('⚠️ Project not found:', projectId);
+                        console.warn('   This may cause "Node not found" errors in the frontend');
+                        return NextResponse.json({ success: true }, { status: 200 });
                     }
+
+                    console.log('📄 Project found, updating content...');
+
+                    const content = project.content as {
+                        nodes: any[];
+                        edges: any[];
+                        viewport: any;
+                    };
+
+                    // 🔧 VALIDAÇÃO MELHORADA: Verificar estrutura do content
+                    if (!content || !Array.isArray(content.nodes)) {
+                        console.error('❌ Invalid project content structure:', {
+                            hasContent: !!content,
+                            contentType: typeof content,
+                            hasNodes: !!(content && content.nodes),
+                            nodesType: content ? typeof content.nodes : 'N/A',
+                            isNodesArray: content ? Array.isArray(content.nodes) : false
+                        });
+                        return NextResponse.json({ success: true }, { status: 200 });
+                    }
+
+                    console.log('🔍 Current project content:', {
+                        nodeCount: content.nodes.length,
+                        hasTargetNode: content.nodes.some((n: any) => n.id === nodeId)
+                    });
+
+                    // 🔧 VALIDAÇÃO MELHORADA: Verificar se o nó existe antes de atualizar
+                    const targetNode = content.nodes.find((n: any) => n.id === nodeId);
+                    if (!targetNode) {
+                        console.warn('⚠️ Target node not found in project:', {
+                            nodeId,
+                            projectId,
+                            availableNodes: content.nodes.map((n: any) => ({ id: n.id, type: n.type }))
+                        });
+                        console.warn('   This is likely the cause of "Node not found" errors');
+                        console.warn('   The node may have been deleted after the job was created');
+
+                        // Marcar o job como failed com uma mensagem específica
+                        await database
+                            .update(falJobs)
+                            .set({
+                                status: 'failed',
+                                error: `Target node ${nodeId} not found in project ${projectId}. Node may have been deleted.`,
+                                completedAt: new Date(),
+                            })
+                            .where(eq(falJobs.requestId, payload.request_id));
+
+                        return NextResponse.json({ success: true }, { status: 200 });
+                    }
+
+                    // Encontrar e atualizar o nó
+                    const updatedNodes = content.nodes.map((node: any) => {
+                        if (node.id === nodeId) {
+                            const mediaUrl = job.type === 'image'
+                                ? result.images?.[0]?.url
+                                : result.video?.url;
+
+                            console.log('🎯 Updating target node:', {
+                                nodeId: node.id,
+                                nodeType: node.type,
+                                hasResult: !!result,
+                                hasImages: !!result.images,
+                                hasVideo: !!result.video,
+                                imageUrl: result.images?.[0]?.url,
+                                videoUrl: result.video?.url,
+                                oldUrl: node.data?.generated?.url,
+                                newUrl: mediaUrl,
+                                jobType: job.type
+                            });
+
+                            return {
+                                ...node,
+                                data: {
+                                    ...node.data,
+                                    generated: {
+                                        url: mediaUrl,
+                                        type: job.type === 'image' ? 'image/png' : 'video/mp4',
+                                    },
+                                    loading: false, // Remover flag de loading
+                                    status: undefined, // Remover status pending
+                                    requestId: undefined, // Remover requestId
+                                    updatedAt: new Date().toISOString(),
+                                },
+                            };
+                        }
+                        return node;
+                    });
+
+                    // Salvar project atualizado
+                    await database
+                        .update(projects)
+                        .set({
+                            content: {
+                                ...content,
+                                nodes: updatedNodes,
+                            },
+                            updatedAt: new Date(), // Importante para trigger realtime
+                        })
+                        .where(eq(projects.id, projectId));
+
+                    console.log('✅ Project node updated successfully, realtime should trigger now');
+                } else {
+                    console.warn('⚠️ Missing metadata for project update:', { nodeId, projectId });
+                    console.warn('   Job input may be missing _metadata field');
                 }
             } catch (projectUpdateError) {
-                console.error('Failed to update project:', projectUpdateError);
-                // Não falhar o webhook se atualização do project falhar
+                console.error('❌ Failed to update project:', projectUpdateError);
+                console.error('   This may cause "Node not found" errors in the frontend');
+
+                // Marcar o job como failed se a atualização do projeto falhar
+                await database
+                    .update(falJobs)
+                    .set({
+                        status: 'failed',
+                        error: `Failed to update project: ${projectUpdateError instanceof Error ? projectUpdateError.message : projectUpdateError}`,
+                        completedAt: new Date(),
+                    })
+                    .where(eq(falJobs.requestId, payload.request_id));
+
+                // Não falhar o webhook, mas logar o erro
             }
         }
 

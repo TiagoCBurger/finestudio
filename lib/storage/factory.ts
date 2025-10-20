@@ -3,44 +3,64 @@ import { r2Storage } from './r2';
 import { supabaseStorage } from './supabase';
 import { StorageConfigError } from './errors';
 
-export type StorageProviderType = 'r2' | 'supabase';
-
+/**
+ * Get the configured storage provider based on STORAGE_PROVIDER env var
+ * 
+ * Supported providers:
+ * - 'r2': Cloudflare R2 (default, recommended for production)
+ * - 'supabase': Supabase Storage (fallback option)
+ * 
+ * @throws {StorageConfigError} If provider is not configured or invalid
+ */
 export function getStorageProvider(): StorageProvider {
-    const providerType = (process.env.STORAGE_PROVIDER || 'r2') as StorageProviderType;
+    const provider = process.env.STORAGE_PROVIDER || 'r2';
 
-    // Validate provider type
-    if (providerType !== 'r2' && providerType !== 'supabase') {
+    switch (provider) {
+        case 'r2':
+            // Validate R2 configuration early
+            validateR2Config();
+            return r2Storage;
+
+        case 'supabase':
+            // Supabase uses the existing client configuration
+            return supabaseStorage;
+
+        default:
+            throw new StorageConfigError(
+                `Invalid STORAGE_PROVIDER: "${provider}". Must be "r2" or "supabase".`,
+                provider
+            );
+    }
+}
+
+/**
+ * Validate R2 configuration without initializing the client
+ * Provides early feedback if credentials are missing
+ */
+function validateR2Config(): void {
+    const requiredVars = [
+        'R2_ACCOUNT_ID',
+        'R2_ACCESS_KEY_ID',
+        'R2_SECRET_ACCESS_KEY',
+        'R2_BUCKET_NAME'
+    ];
+
+    const missing = requiredVars.filter(varName => !process.env[varName]);
+
+    if (missing.length > 0) {
         throw new StorageConfigError(
-            `Unknown storage provider: '${providerType}'. Valid options are: 'r2', 'supabase'`,
-            providerType
+            `R2 storage is not properly configured. Missing environment variables: ${missing.join(', ')}. ` +
+            `Either configure R2 or set STORAGE_PROVIDER=supabase to use Supabase Storage.`,
+            'r2'
         );
     }
 
-    try {
-        switch (providerType) {
-            case 'r2':
-                return r2Storage;
-            case 'supabase':
-                return supabaseStorage;
-            default:
-                throw new StorageConfigError(
-                    `Unknown storage provider: '${providerType}'. Valid options are: 'r2', 'supabase'`,
-                    providerType
-                );
-        }
-    } catch (error) {
-        if (error instanceof StorageConfigError) {
-            throw error;
-        }
-        if (error instanceof Error) {
-            throw new StorageConfigError(
-                `Failed to initialize storage provider '${providerType}': ${error.message}`,
-                providerType
-            );
-        }
-        throw new StorageConfigError(
-            `Failed to initialize storage provider '${providerType}': Unknown error`,
-            providerType
+    // Warn if public URL is not configured (will use signed URLs with expiration)
+    if (!process.env.R2_PUBLIC_URL) {
+        console.warn(
+            '[Storage Factory] R2_PUBLIC_URL is not configured. ' +
+            'Signed URLs will be used and will expire after 7 days. ' +
+            'For production, configure R2_PUBLIC_URL or enable public access on your R2 bucket.'
         );
     }
 }

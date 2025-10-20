@@ -55,8 +55,7 @@ export const uploadFile = async (
   const extension = file.name.split('.').pop();
   const name = filename ?? `${nanoid()}.${extension}`;
 
-  // Get the configured storage provider
-  // This may throw StorageConfigError if provider is not configured correctly
+  // Get the R2 storage provider
   const storage = getStorageProvider();
 
   // Upload using the selected provider

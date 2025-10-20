@@ -66,13 +66,13 @@ const SuspendedPostHogPageView = () => {
 
 export const PostHogIdentifyProvider = ({ children }: PostHogProviderProps) => {
   const posthog = usePostHog();
-  const user = useUser();
+  const { user } = useUser();
 
   useEffect(() => {
     if (posthog && user) {
       posthog.identify(user.id, {
         email: user.email,
-        name: user.user_metadata.name,
+        name: user.user_metadata?.name,
       });
     }
   }, [posthog, user]);

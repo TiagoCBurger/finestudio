@@ -31,10 +31,10 @@ export async function POST(request: NextRequest) {
         }
 
         // Validate bucket type
-        const validBuckets: StorageBucket[] = ['avatars', 'files', 'screenshots'];
-        if (!validBuckets.includes(bucket)) {
+        const { isValidStorageBucket, STORAGE_BUCKETS } = await import('@/lib/storage/types');
+        if (!isValidStorageBucket(bucket)) {
             return NextResponse.json(
-                { error: `Invalid bucket. Must be one of: ${validBuckets.join(', ')}` },
+                { error: `Invalid bucket. Must be one of: ${STORAGE_BUCKETS.join(', ')}` },
                 { status: 400 }
             );
         }

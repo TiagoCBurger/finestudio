@@ -288,8 +288,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0(ws@8.18.2)(zod@3.25.64)
       openapi-fetch:
-        specifier: ^0.14.0
-        version: 0.14.0
+        specifier: ^0.15.0
+        version: 0.15.0
       perfect-cursors:
         specifier: ^1.0.5
         version: 1.0.5
@@ -4700,8 +4700,8 @@ packages:
       zod:
         optional: true
 
-  openapi-fetch@0.14.0:
-    resolution: {integrity: sha512-PshIdm1NgdLvb05zp8LqRQMNSKzIlPkyMxYFxwyHR+UlKD4t2nUjkDhNxeRbhRSEd3x5EUNh2w5sJYwkhOH4fg==}
+  openapi-fetch@0.15.0:
+    resolution: {integrity: sha512-OjQUdi61WO4HYhr9+byCPMj0+bgste/LtSBEcV6FzDdONTs7x0fWn8/ndoYwzqCsKWIxEZwo4FN/TG1c1rI8IQ==}
 
   openapi-typescript-helpers@0.0.15:
     resolution: {integrity: sha512-opyTPaunsklCBpTK8JGef6mfPhLSnyy5a0IN9vKtx3+4aExf+KxEqYwIy3hqkedXIB97u357uLMJsOnm3GVjsw==}
@@ -5191,6 +5191,7 @@ packages:
 
   shadcn-prose@1.0.8:
     resolution: {integrity: sha512-Llpz/dC+ZTqLzh8qrIZM5p5ggbHQ4MKP90NkfXvV1CF5Hdg8uFO+IAiF1P5mSqMHqnPW0XT9ZkqqgXR7fNSVig==}
+    deprecated: 'You can now install this as a shadcn component with: npx kibo-ui add typography'
 
   sharp@0.34.2:
     resolution: {integrity: sha512-lszvBmB9QURERtyKT2bNmsgxXK0ShJrL/fvqlonCo7e6xBF8nT8xU6pW+PMIbLsz0RxQk3rgH9kd8UmvOzlMJg==}
@@ -10543,7 +10544,7 @@ snapshots:
       ws: 8.18.2
       zod: 3.25.64
 
-  openapi-fetch@0.14.0:
+  openapi-fetch@0.15.0:
     dependencies:
       openapi-typescript-helpers: 0.0.15
 

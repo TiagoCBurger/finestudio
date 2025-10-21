@@ -1,5 +1,5 @@
 import { env } from '@/lib/env';
-import type { ImageModel, ImageModelCallWarning } from 'ai';
+import type { ImageModel } from 'ai';
 import { currentUser } from '@/lib/auth';
 import { createFalJob } from '@/lib/fal-jobs';
 import { database } from '@/lib/database';
@@ -8,20 +8,70 @@ import { eq } from 'drizzle-orm';
 
 const models = [
     'google/nano-banana',
+    'google/nano-banana-edit',
 ] as const;
 
 type KieModel = (typeof models)[number];
 
-type KieImageOutput = {
-    images: Array<{
-        url: string;
-        width: number;
-        height: number;
-        content_type: string;
-    }>;
-    seed?: number;
+/**
+ * Maximum number of images supported by KIE.ai edit models
+ */
+const MAX_KIE_IMAGES = 10;
+
+/**
+ * Kie.ai API response structure
+ */
+interface KieApiResponse {
+    data?: {
+        taskId?: string;
+        recordId?: string;
+        id?: string;
+    };
+    taskId?: string;
+    recordId?: string;
+    id?: string;
+    request_id?: string;
+    [key: string]: unknown;
+}
+
+/**
+ * Kie.ai API input structure
+ */
+interface KieApiInput {
     prompt: string;
-};
+    output_format: 'png' | 'jpeg' | 'webp';
+    image_size: string;
+    /** 
+     * Array of image URLs for edit models
+     * @remarks Supports up to 10 images. Additional images will be ignored.
+     * @see MAX_KIE_IMAGES
+     */
+    image_urls?: string[];
+    /** Internal metadata for webhook processing */
+    _metadata?: {
+        nodeId?: string;
+        projectId?: string;
+    };
+}
+
+/**
+ * Extracts request ID from Kie.ai API response
+ * Tries multiple possible locations in the response object
+ */
+function extractRequestId(response: KieApiResponse): string | null {
+    return (
+        response.data?.taskId ||
+        response.data?.recordId ||
+        response.data?.id ||
+        response.taskId ||
+        response.recordId ||
+        response.id ||
+        response.request_id ||
+        null
+    );
+}
+
+
 
 export const kieAIServer = {
     image: (modelId: KieModel): ImageModel => ({
@@ -31,17 +81,54 @@ export const kieAIServer = {
         maxImagesPerCall: 1,
         doGenerate: async ({
             prompt,
+            size,
             providerOptions,
         }) => {
-            // Build input for Kie.ai API
-            const input = {
+            // KIE.ai expects aspect ratio format directly (e.g., "1:1", "16:9", "auto")
+            const imageSize = size || '1:1'; // Default to 1:1 if not provided
+
+            console.log('🔍 KIE image_size:', {
+                size: imageSize,
+                modelId,
+            });
+
+            const input: KieApiInput = {
                 prompt,
                 output_format: 'png',
-                image_size: '1:1', // Kie.ai uses aspect ratio format
+                image_size: imageSize, // Pass aspect ratio directly (e.g., "1:1", "16:9", "auto")
             };
+
+            // Handle image input for both generation and edit models
+            const isEditModel = modelId.includes('-edit');
+            const imageUrl = typeof providerOptions?.kie?.image === 'string'
+                ? providerOptions.kie.image
+                : undefined;
+            const imageUrls = Array.isArray(providerOptions?.kie?.images)
+                ? providerOptions.kie.images.filter((url): url is string => typeof url === 'string')
+                : undefined;
+
+            // Both generation and edit models can accept images
+            // Edit models require images, generation models use them as reference
+            if (imageUrls && imageUrls.length > 0) {
+                console.log(`🖼️ Adding ${imageUrls.length} image(s) to KIE ${isEditModel ? 'edit' : 'generation'} request`);
+                input.image_urls = imageUrls.slice(0, MAX_KIE_IMAGES);
+
+                if (imageUrls.length > MAX_KIE_IMAGES) {
+                    console.warn(`⚠️ KIE.ai supports max ${MAX_KIE_IMAGES} images. ${imageUrls.length - MAX_KIE_IMAGES} image(s) ignored.`);
+                }
+            } else if (imageUrl) {
+                console.log(`🖼️ Adding single image to KIE ${isEditModel ? 'edit' : 'generation'} request`);
+                input.image_urls = [imageUrl]; // Convert to array
+            } else if (isEditModel) {
+                console.warn('⚠️ Edit model called without image input - this may fail');
+            }
 
             console.log('🔍 Kie.ai queue request:', {
                 modelId,
+                isEditModel,
+                hasImage: !!imageUrl,
+                hasImages: !!(imageUrls && imageUrls.length > 0),
+                imageCount: imageUrls?.length ?? (imageUrl ? 1 : 0),
                 inputKeys: Object.keys(input),
                 fullInput: JSON.stringify(input, null, 2),
             });
@@ -99,28 +186,55 @@ export const kieAIServer = {
             console.log('Kie.ai job pre-created with ID:', jobId);
 
             // Submeter para a API Kie.ai
-            const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${env.KIE_API_KEY}`,
-                },
-                body: JSON.stringify({
-                    model: modelId,
-                    callBackUrl: webhookUrl,
-                    input,
-                }),
-            });
+            let submission: KieApiResponse;
+            try {
+                const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${env.KIE_API_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        model: modelId,
+                        callBackUrl: webhookUrl,
+                        input,
+                    }),
+                });
 
-            if (!response.ok) {
-                throw new Error(`Kie.ai API error: ${response.status} ${response.statusText}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Kie.ai API error:', {
+                        status: response.status,
+                        statusText: response.statusText,
+                        body: errorText,
+                    });
+                    throw new Error(`Kie.ai API error: ${response.status} ${response.statusText}`);
+                }
+
+                submission = await response.json() as KieApiResponse;
+
+                console.log('📥 Kie.ai API response:', {
+                    fullResponse: JSON.stringify(submission, null, 2),
+                    hasData: !!submission.data,
+                    dataKeys: submission.data ? Object.keys(submission.data) : [],
+                    topLevelKeys: Object.keys(submission),
+                });
+            } catch (error) {
+                console.error('❌ Failed to submit job to Kie.ai:', error);
+                throw new Error(
+                    `Failed to submit job to Kie.ai: ${error instanceof Error ? error.message : 'Unknown error'}`
+                );
             }
 
-            const submission = await response.json();
-            const request_id = submission.data?.taskId || submission.data?.recordId || submission.id || submission.request_id || submission.taskId;
+            // Extract request ID using helper function
+            const request_id = extractRequestId(submission);
 
             if (!request_id) {
-                throw new Error('Kie.ai API did not return a valid request ID');
+                console.error('❌ Could not find request ID in response:', submission);
+                throw new Error(
+                    'Kie.ai API did not return a valid request ID. ' +
+                    'Expected one of: data.taskId, data.recordId, data.id, taskId, recordId, id, request_id'
+                );
             }
 
             console.log('Kie.ai queue submitted:', { request_id, useWebhook });

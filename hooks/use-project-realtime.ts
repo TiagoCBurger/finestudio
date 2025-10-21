@@ -123,19 +123,19 @@ export function useProjectRealtime(projectId: string | undefined): UseProjectRea
 
     // Memoized handler for project updates
     const handleProjectUpdate = useCallback((payload: ProjectUpdatePayload) => {
-        // Enhanced broadcast receive logging with detailed payload information
+        // Enhanced broadcast receive logging (sanitized for security)
         realtimeLogger.info('📨 Broadcast received', realtimeLogger.createContext({
             projectId,
             payloadType: typeof payload,
             hasPayload: !!payload,
-            payloadKeys: payload ? Object.keys(payload) : []
+            payloadKeys: payload ? Object.keys(payload).filter(k => !['new', 'old'].includes(k)) : []
         }));
 
         // Filter out unexpected payload structures to prevent raw data display
         if (!payload || typeof payload !== 'object') {
             realtimeLogger.warn('Invalid payload received, ignoring', {
                 projectId,
-                payload: typeof payload,
+                payloadType: typeof payload,
                 hint: 'Check database trigger function is sending correct payload structure'
             });
             return;
@@ -148,13 +148,16 @@ export function useProjectRealtime(projectId: string | undefined): UseProjectRea
             schema: payload.schema || 'public'
         };
 
-        realtimeLogger.info('Project updated via broadcast', realtimeLogger.createContext({
-            projectId,
-            type: cleanPayload.type,
-            table: cleanPayload.table,
-            hasNewData: !!payload.new,
-            hasOldData: !!payload.old
-        }));
+        // Only log in development to reduce production noise
+        if (process.env.NODE_ENV === 'development') {
+            realtimeLogger.info('Project updated via broadcast', realtimeLogger.createContext({
+                projectId,
+                type: cleanPayload.type,
+                table: cleanPayload.table,
+                hasNewData: !!payload.new,
+                hasOldData: !!payload.old
+            }));
+        }
 
         // Revalidate SWR cache to update UI
         try {

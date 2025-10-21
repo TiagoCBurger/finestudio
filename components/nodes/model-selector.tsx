@@ -157,10 +157,26 @@ export const ModelSelector = ({
 
   // Filter out disabled models defensively
   const enabledOptions = Object.fromEntries(
-    Object.entries(options).filter(([_, model]) =>
-      !model.disabled && model.enabled !== false
-    )
+    Object.entries(options).filter(([key, model]) => {
+      const isEnabled = !model.disabled && model.enabled !== false;
+
+      // Debug log for nano-banana models
+      if (key.includes('nano-banana')) {
+        console.log(`[ModelSelector] ${key}:`, {
+          label: model.label,
+          chef: model.chef?.id,
+          disabled: model.disabled,
+          enabled: model.enabled,
+          isEnabled,
+        });
+      }
+
+      return isEnabled;
+    })
   );
+
+  console.log('[ModelSelector] Total enabled options:', Object.keys(enabledOptions).length);
+  console.log('[ModelSelector] Keys:', Object.keys(enabledOptions));
 
   const activeModel = enabledOptions[value];
 

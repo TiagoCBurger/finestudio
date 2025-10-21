@@ -111,7 +111,35 @@ export const editImageAction = async ({
       throw new Error('Model does not support editing');
     }
 
-    const provider = model.providers[0];
+    // Check if KIE model has a dedicated edit model
+    const isKieModel = model.chef.id === 'kie';
+    const kieEditModelId = isKieModel && model.providerOptions?.kie?.editModelId
+      ? model.providerOptions.kie.editModelId
+      : undefined;
+
+    // Debug logging (development only)
+    if (isKieModel && process.env.NODE_ENV === 'development') {
+      console.log('🔍 KIE model detected:', {
+        modelId,
+        hasEditModel: !!kieEditModelId,
+        editModelId: kieEditModelId,
+      });
+    }
+
+    // Use edit model for KIE if available
+    let provider = model.providers[0];
+    if (kieEditModelId && typeof kieEditModelId === 'string') {
+      console.log(`🔄 Switching KIE model from ${provider.model.modelId} to ${kieEditModelId} for editing`);
+      provider = {
+        ...provider,
+        model: {
+          ...provider.model,
+          modelId: kieEditModelId,
+        },
+      };
+    } else if (isKieModel && !kieEditModelId) {
+      console.warn('⚠️ KIE model does not have editModelId configured');
+    }
 
     let image: Experimental_GenerateImageResult['image'] | undefined;
     let responseHeaders: any = {};
@@ -141,6 +169,7 @@ export const editImageAction = async ({
         .then((buffer) => Buffer.from(buffer).toString('base64'));
 
       const isFalProvider = provider.model.provider === 'fal';
+      const isKieProvider = provider.model.provider === 'kie';
 
       // Para múltiplas imagens, crie um prompt mais detalhado
       let enhancedPrompt = prompt;
@@ -157,8 +186,16 @@ MULTIPLE IMAGES CONTEXT:
 Please analyze all the visual elements from the connected images and create a harmonious composition that incorporates elements from each image.`;
       }
 
+      // For KIE models, use the edit model if specified
+      let modelToUse = provider.model;
+      if (isKieProvider && kieEditModelId) {
+        console.log(`🔄 Switching KIE model from ${provider.model.modelId} to ${kieEditModelId} for edit operation`);
+        const { kieAIServer } = await import('@/lib/models/image/kie.server');
+        modelToUse = kieAIServer.image(kieEditModelId as 'google/nano-banana' | 'google/nano-banana-edit');
+      }
+
       const generatedImageResponse = await generateImage({
-        model: provider.model,
+        model: modelToUse,
         prompt: enhancedPrompt,
         size: size as never,
         providerOptions: isFalProvider
@@ -170,11 +207,20 @@ Please analyze all the visual elements from the connected images and create a ha
               projectId, // Para atualização do project via webhook
             },
           }
-          : {
-            bfl: {
-              image: base64Image,
+          : isKieProvider
+            ? {
+              kie: {
+                image: images[0].url, // Single image (backward compatibility)
+                images: images.map((img) => img.url), // All images (array format)
+                nodeId,
+                projectId,
+              },
+            }
+            : {
+              bfl: {
+                image: base64Image,
+              },
             },
-          },
       });
 
       // Rastreamento de créditos removido
@@ -196,6 +242,53 @@ Please analyze all the visual elements from the connected images and create a ha
       if (isPending) {
         console.log('✅ Image edit pending, returning placeholder for webhook polling');
 
+        const requestId = responseHeaders['x-fal-request-id'] || responseHeaders['x-kie-request-id'];
+
+        // Atualizar o nó no content para persistir o estado de loading
+        const project = await database.query.projects.findFirst({
+          where: eq(projects.id, projectId),
+        });
+
+        if (project) {
+          const content = project.content as {
+            nodes: Node[];
+            edges: Edge[];
+            viewport: Viewport;
+          };
+
+          if (content && Array.isArray(content.nodes)) {
+            const updatedNodes = content.nodes.map((node) => {
+              if (node.id === nodeId) {
+                return {
+                  ...node,
+                  data: {
+                    ...(node.data ?? {}),
+                    generated: {
+                      url: '', // URL vazia, será preenchida pelo webhook
+                      type: 'image/png',
+                      headers: responseHeaders,
+                    },
+                    loading: true,
+                    status: 'generating',
+                    requestId,
+                    updatedAt: new Date().toISOString(),
+                    description: instructions ?? defaultPrompt,
+                  },
+                };
+              }
+              return node;
+            });
+
+            await database
+              .update(projects)
+              .set({
+                content: { ...content, nodes: updatedNodes },
+                updatedAt: new Date(),
+              })
+              .where(eq(projects.id, projectId));
+          }
+        }
+
         return {
           nodeData: {
             generated: {
@@ -204,6 +297,8 @@ Please analyze all the visual elements from the connected images and create a ha
               headers: responseHeaders,
             },
             loading: true, // Flag para manter loading state
+            status: 'generating',
+            requestId,
             updatedAt: new Date().toISOString(),
             description: instructions ?? defaultPrompt,
           },

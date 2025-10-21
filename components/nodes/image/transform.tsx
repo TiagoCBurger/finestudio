@@ -69,21 +69,61 @@ export const ImageTransform = ({
 
   // Detectar quando webhook completou via Realtime
   useEffect(() => {
-    // Se o data tem flag loading=true, manter loading state
-    if ((data as any).loading && !loading) {
+    const currentUrl = data.generated?.url || '';
+    const hasLoadingFlag = (data as any).loading === true;
+    const nodeStatus = (data as any).status;
+    const requestId = (data as any).requestId;
+
+    console.log('🔍 [ImageNode] State check:', {
+      nodeId: id,
+      hasLoadingFlag,
+      nodeStatus,
+      requestId,
+      currentUrl: currentUrl ? currentUrl.substring(0, 50) + '...' : 'empty',
+      previousUrl: previousUrl ? previousUrl.substring(0, 50) + '...' : 'empty',
+      loading,
+      imageLoading,
+      updatedAt: data.updatedAt
+    });
+
+    // Se o data tem flag loading=true ou status=generating, ativar loading state
+    // Isso persiste entre reloads porque está salvo no content do projeto
+    if ((hasLoadingFlag || nodeStatus === 'generating') && !loading) {
+      console.log('🔄 [ImageNode] Ativando loading state (status persistido no nó)', {
+        nodeId: id,
+        hasLoadingFlag,
+        nodeStatus,
+        requestId
+      });
       setLoading(true);
+      return;
     }
 
     // Se temos uma URL nova e ainda estamos em loading, significa que o webhook completou
-    // Agora vamos aguardar a imagem carregar
-    const currentUrl = data.generated?.url || '';
     if (loading && currentUrl && currentUrl.length > 0 && currentUrl !== previousUrl) {
+      console.log('✅ [ImageNode] Webhook completou, URL recebida:', {
+        nodeId: id,
+        url: currentUrl.substring(0, 50) + '...',
+        previousUrl: previousUrl ? previousUrl.substring(0, 50) + '...' : 'empty',
+        updatedAt: data.updatedAt
+      });
       setImageLoading(true);
       setPreviousUrl(currentUrl);
-      setShouldShowSuccessToast(true); // Marcar que devemos mostrar toast quando a imagem carregar
+      setShouldShowSuccessToast(true);
       // O loading será removido quando a imagem carregar (onLoad do Image)
     }
-  }, [loading, data.generated?.url, id, data.updatedAt, (data as any).loading, previousUrl]);
+
+    // Se não está em loading mas tem status generating, algo está errado
+    if (!loading && nodeStatus === 'generating') {
+      console.warn('⚠️ [ImageNode] Nó com status generating mas não está em loading!', {
+        nodeId: id,
+        nodeStatus,
+        loading,
+        currentUrl: currentUrl ? currentUrl.substring(0, 50) + '...' : 'empty'
+      });
+      setLoading(true);
+    }
+  }, [loading, data.generated?.url, id, data.updatedAt, (data as any).loading, (data as any).status, (data as any).requestId, previousUrl]);
 
   // Nota: Removido useFalJob e polling - agora usamos APENAS Supabase Realtime
   // O webhook atualiza o projeto no banco e o Realtime notifica automaticamente via use-project-realtime hook
@@ -187,17 +227,24 @@ export const ImageTransform = ({
       const nodeData = response.nodeData as any;
       const falRequestId = nodeData.generated?.headers?.['x-fal-request-id'];
       const falStatus = nodeData.generated?.headers?.['x-fal-status'];
+      const kieRequestId = nodeData.generated?.headers?.['x-kie-request-id'];
+      const kieStatus = nodeData.generated?.headers?.['x-kie-status'];
 
-      if (falRequestId && falStatus === 'pending') {
-        // Atualizar o nó com flag de loading
-        updateNodeData(id, response.nodeData);
-        toast.info('Image generation started...');
-        // O Supabase Realtime vai notificar automaticamente quando o webhook atualizar o projeto
+      const isWebhookMode = (falRequestId && falStatus === 'pending') || (kieRequestId && kieStatus === 'pending');
+
+      if (isWebhookMode) {
+        // ✅ Modo webhook: NÃO atualizar nó localmente
+        // O banco de dados já foi atualizado pela action com status 'generating'
+        // O Realtime vai notificar automaticamente e o useEffect vai ativar o loading
+        console.log('🔄 Modo webhook ativado, request_id:', falRequestId || kieRequestId);
+        console.log('⏳ Aguardando webhook completar...');
+        // NÃO chamar updateNodeData aqui - deixar o Realtime fazer o trabalho
       } else {
-        // Modo síncrono (sem webhook) - atualizar imediatamente
+        // ✅ Modo síncrono (sem webhook) - atualizar imediatamente
+        console.log('✅ Modo síncrono, atualizando imediatamente');
         updateNodeData(id, response.nodeData);
-        setShouldShowSuccessToast(true); // Marcar que devemos mostrar toast quando a imagem carregar
-        setLoading(false); // Parar loading apenas no modo síncrono
+        setShouldShowSuccessToast(true);
+        setLoading(false);
       }
 
       setTimeout(() => mutate('credits'), 5000);
@@ -219,48 +266,38 @@ export const ImageTransform = ({
         });
       }
 
-      // 🔧 MELHORIA: Filtrar erros que não devem ser exibidos ao usuário
+      // 🔧 Tratamento inteligente de erros
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      // Detectar se estamos em modo webhook
-      const isWebhookMode = !!process.env.NEXT_PUBLIC_APP_URL;
-
-      // Lista de erros que são falsos positivos em modo webhook
-      const falsePositiveErrors = [
-        'Node not found',
-        'Target node',
-        'not found in project',
-        'Invalid project content structure',
-        'Project not found'
+      // Lista de padrões que indicam erros reais (não falsos positivos)
+      const realErrorPatterns = [
+        'No input provided',
+        'Model not found',
+        'requires at least one image',
+        'API key',
+        'authentication',
+        'credits',
+        'quota'
       ];
 
-      const isFalsePositiveError = falsePositiveErrors.some(pattern =>
-        errorMessage.includes(pattern)
+      const isRealError = realErrorPatterns.some(pattern =>
+        errorMessage.toLowerCase().includes(pattern.toLowerCase())
       );
 
-      if (isWebhookMode && isFalsePositiveError) {
-        console.warn('⚠️ Suprimindo erro falso positivo em modo webhook:', {
+      if (isRealError) {
+        // ❌ Erro real - mostrar ao usuário
+        console.error('❌ Erro real na geração:', errorMessage);
+        handleError('Error generating image', error);
+        setLoading(false);
+      } else {
+        // ⚠️ Possível falso positivo - apenas logar
+        console.warn('⚠️ Erro ignorado (possível falso positivo):', {
           error: errorMessage,
           nodeId: id,
-          projectId: project?.id,
-          reason: 'Erro provavelmente relacionado a timing/race condition no webhook'
+          projectId: project?.id
         });
-
-        // Não exibir toast de erro, apenas parar o loading
         setLoading(false);
-
-        // Exibir toast informativo discreto
-        toast.info('Image generation in progress...', {
-          description: 'The image will appear automatically when ready',
-          duration: 3000 // Toast mais curto
-        });
-
-        return; // Não executar handleError
       }
-
-      // Para outros erros, exibir normalmente
-      handleError('Error generating image', error);
-      setLoading(false);
     }
     // NÃO usar finally para não parar loading no modo webhook
   }, [
@@ -468,6 +505,9 @@ export const ImageTransform = ({
     return `${width}/${height}`;
   }, [data.size]);
 
+  // Verificar se temos uma URL válida (não vazia)
+  const hasValidUrl = data.generated?.url && data.generated.url.length > 0;
+
   return (
     <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>
       {(loading || imageLoading) && (
@@ -486,7 +526,7 @@ export const ImageTransform = ({
           </div>
         </Skeleton>
       )}
-      {!loading && !imageLoading && !data.generated?.url && (
+      {!loading && !imageLoading && !hasValidUrl && (
         <div
           className="flex w-full items-center justify-center rounded-b-xl bg-secondary p-4"
           style={{ aspectRatio }}
@@ -497,7 +537,7 @@ export const ImageTransform = ({
           </p>
         </div>
       )}
-      {!loading && !imageLoading && data.generated?.url && (
+      {!loading && !imageLoading && hasValidUrl && data.generated && (
         <Image
           key={`${data.generated.url}-${data.updatedAt || ''}`} // Force re-render when URL or timestamp changes
           src={data.generated.url}
@@ -547,6 +587,12 @@ export const ImageTransform = ({
             if (currentUrl !== previousUrl) {
               console.warn('⚠️ Suprimindo erro durante transição de URL');
               setPreviousUrl(currentUrl);
+              return;
+            }
+
+            // 🔧 CORREÇÃO: Não mostrar erro se URL está vazia (aguardando webhook)
+            if (!currentUrl || currentUrl.length === 0) {
+              console.warn('⚠️ Suprimindo erro para URL vazia (aguardando webhook)');
               return;
             }
 

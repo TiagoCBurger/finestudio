@@ -60,10 +60,32 @@ export const ProjectProvider = ({
       revalidateOnFocus: false, // Don't revalidate on window focus
       revalidateOnReconnect: true, // Revalidate on reconnect
       dedupingInterval: 1000, // Dedupe requests within 1 second
+      // Log when SWR revalidates
+      onSuccess: (data) => {
+        console.log('📊 [ProjectProvider] SWR revalidated successfully', {
+          projectId: initialData.id,
+          hasContent: !!data?.content,
+          nodeCount: (data?.content as any)?.nodes?.length || 0,
+          updatedAt: data?.updatedAt
+        });
+      },
+      onError: (err) => {
+        console.error('❌ [ProjectProvider] SWR revalidation error:', err);
+      },
       // Compare function to prevent unnecessary re-renders
       compare: (a, b) => {
         // Deep comparison of content to prevent re-renders when data hasn't actually changed
-        return JSON.stringify(a) === JSON.stringify(b);
+        const isSame = JSON.stringify(a) === JSON.stringify(b);
+        if (!isSame) {
+          console.log('🔄 [ProjectProvider] Data changed, triggering re-render', {
+            projectId: initialData.id,
+            oldNodeCount: (a?.content as any)?.nodes?.length || 0,
+            newNodeCount: (b?.content as any)?.nodes?.length || 0,
+            oldUpdatedAt: a?.updatedAt,
+            newUpdatedAt: b?.updatedAt
+          });
+        }
+        return isSame;
       },
     }
   );

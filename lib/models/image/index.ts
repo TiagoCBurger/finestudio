@@ -8,7 +8,7 @@ import { falAI } from './fal';
 import { kieAI } from './kie';
 import { mockAI } from './mock';
 
-export type ImageSize = `${number}x${number}`;
+export type ImageSize = `${number}x${number}` | `${number}:${number}` | 'auto';
 
 type TersaImageModel = TersaModel & {
   providers: (TersaProvider & {
@@ -22,67 +22,95 @@ type TersaImageModel = TersaModel & {
   })[];
   sizes?: ImageSize[];
   supportsEdit?: boolean;
-  providerOptions?: Record<string, Record<string, string>>;
-  enabled?: boolean; // Flag para ativar/desativar modelo
+  providerOptions?: Record<string, Record<string, any>>; // Changed from string to any to support editModelId
+  enabled?: boolean;
 };
 
-// Debug: Check if falAI is properly imported
-if (!falAI || typeof falAI.image !== 'function') {
-  console.error('ERROR: falAI is not properly imported!', { falAI });
-  throw new Error('falAI module failed to load');
-}
+/**
+ * Validates that a provider module is properly loaded
+ * @throws Error if provider is invalid
+ */
+const validateProvider = (provider: unknown, name: string): void => {
+  if (!provider || typeof (provider as any).image !== 'function') {
+    console.error(`ERROR: ${name} is not properly imported!`, { provider });
+    throw new Error(`${name} module failed to load`);
+  }
+};
+
+// Validate all providers at module load time
+validateProvider(falAI, 'falAI');
+validateProvider(kieAI, 'kieAI');
+validateProvider(mockAI, 'mockAI');
+
+// Standard image sizes supported by most models
+const STANDARD_SIZES: ImageSize[] = ['1024x1024', '768x1024', '1024x768', '512x512'];
+
+// KIE.ai Nano Banana aspect ratios (as per API documentation)
+const KIE_ASPECT_RATIOS: ImageSize[] = [
+  '1:1',
+  '9:16',
+  '16:9',
+  '3:4',
+  '4:3',
+  '3:2',
+  '2:3',
+  '5:4',
+  '4:5',
+  '21:9',
+  'auto',
+];
 
 export const imageModels: Record<string, TersaImageModel> = {
-  // 🧪 MOCK - Modelos de teste sem custo
+  // 🧪 MOCK - Test models with no cost
   'mock-fast': {
-    label: '🧪 Mock Fast (Teste Grátis)',
+    label: '🧪 Mock Fast (Free Test)',
     chef: providers.mock,
     providers: [
       {
         ...providers.mock,
         model: mockAI.image('mock-fast'),
-        getCost: () => 0, // Grátis!
+        getCost: () => 0,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    sizes: STANDARD_SIZES,
     priceIndicator: 'low',
     supportsEdit: false,
     default: false,
-    enabled: true, // ✅ Ativo para testes
+    enabled: true,
   },
   'mock-edit': {
-    label: '🧪 Mock Edit (Teste Edição)',
+    label: '🧪 Mock Edit (Test Editing)',
     chef: providers.mock,
     providers: [
       {
         ...providers.mock,
         model: mockAI.image('mock-edit'),
-        getCost: () => 0, // Grátis!
+        getCost: () => 0,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    sizes: STANDARD_SIZES,
     priceIndicator: 'low',
     supportsEdit: true,
     default: false,
-    enabled: true, // ✅ Ativo para testes
+    enabled: true,
   },
-  // 🍌 NANO BANANA - Modelo de edição de imagem rápido e econômico
+  // 🍌 NANO BANANA - Fast and economical image editing model
   'fal-nano-banana': {
-    label: '🍌 Nano Banana',
-    chef: providers.unknown,
+    label: '🍌 Nano Banana (Fal)',
+    chef: providers.fal,
     providers: [
       {
-        ...providers.unknown,
+        ...providers.fal,
         model: falAI.image('fal-ai/nano-banana/edit'),
         // https://fal.ai/models/fal-ai/nano-banana/edit
-        getCost: () => 2, // Muito barato!
+        getCost: () => 2,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    sizes: STANDARD_SIZES,
     priceIndicator: 'low',
     supportsEdit: true,
     default: false,
-    enabled: true, // ✅ Ativo
+    enabled: true,
   },
   'fal-flux-dev-image-to-image': {
     label: 'FLUX Dev Image-to-Image',
@@ -92,13 +120,13 @@ export const imageModels: Record<string, TersaImageModel> = {
         ...providers.fal,
         model: falAI.image('fal-ai/flux/dev/image-to-image'),
         // https://fal.ai/models/fal-ai/flux/dev/image-to-image
-        getCost: () => 0.025, // $0.025 per image
+        getCost: () => 0.025,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    sizes: STANDARD_SIZES,
     supportsEdit: true,
     default: true,
-    enabled: true, // ✅ Ativo
+    enabled: true,
   },
   'fal-gpt-image-edit': {
     label: 'GPT Image Edit (BYOK)',
@@ -108,13 +136,13 @@ export const imageModels: Record<string, TersaImageModel> = {
         ...providers.fal,
         model: falAI.image('fal-ai/gpt-image-1/edit-image/byok'),
         // https://fal.ai/models/fal-ai/gpt-image-1/edit-image/byok
-        // BYOK model - uses user's OpenAI API key
-        getCost: () => 0.02, // Estimated cost per image
+        // BYOK model - requires user's OpenAI API key
+        getCost: () => 0.02,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    sizes: STANDARD_SIZES,
     supportsEdit: true,
-    enabled: false, // ❌ Desativado (requer verificação OpenAI)
+    enabled: false, // Disabled - requires OpenAI verification
   },
   'fal-flux-pro-kontext': {
     label: 'FLUX Pro Kontext (Fal)',
@@ -127,8 +155,9 @@ export const imageModels: Record<string, TersaImageModel> = {
         getCost: () => 0.055,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-    enabled: true, // ✅ Ativo
+    sizes: STANDARD_SIZES,
+    supportsEdit: false, // Apenas geração, não edição
+    enabled: true,
   },
   'fal-flux-pro-kontext-max-multi': {
     label: 'FLUX Pro Kontext Max Multi (Fal)',
@@ -141,8 +170,9 @@ export const imageModels: Record<string, TersaImageModel> = {
         getCost: () => 0.06,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-    enabled: true, // ✅ Ativo
+    sizes: STANDARD_SIZES,
+    supportsEdit: false, // Apenas geração, não edição
+    enabled: true,
   },
   'fal-ideogram-character': {
     label: 'Ideogram Character (Fal)',
@@ -155,8 +185,9 @@ export const imageModels: Record<string, TersaImageModel> = {
         getCost: () => 0.08,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
-    enabled: true, // ✅ Ativo
+    sizes: STANDARD_SIZES,
+    supportsEdit: false, // Apenas geração, não edição
+    enabled: true,
   },
   'kie-nano-banana': {
     label: '🍌 Nano Banana (Kie.ai)',
@@ -168,109 +199,52 @@ export const imageModels: Record<string, TersaImageModel> = {
         getCost: () => 0.03,
       },
     ],
-    sizes: ['1024x1024', '768x1024', '1024x768', '512x512'],
+    sizes: KIE_ASPECT_RATIOS, // Use aspect ratios directly (1:1, 16:9, etc)
     priceIndicator: 'low',
-    enabled: true, // ✅ Ativo
+    supportsEdit: true, // ✅ Suporta edição de imagem
+    default: false,
+    enabled: true,
+    providerOptions: {
+      kie: {
+        editModelId: 'google/nano-banana-edit', // Usa modelo de edição quando há imagem
+      },
+    },
   },
 };
 
 /**
- * Retorna apenas os modelos de imagem que estão habilitados
- * Use esta função para filtrar modelos ativos na UI
+ * Returns only enabled image models for UI display
+ * Models are enabled by default unless explicitly disabled (enabled: false)
+ * 
+ * @returns Record of enabled image models with their configurations
  */
 export const getEnabledImageModels = (): Record<string, TersaImageModel> => {
-  try {
-    // Verificações de segurança mais robustas
-    if (!imageModels) {
-      console.error('imageModels is null or undefined');
-      return {};
-    }
+  const enabled = Object.fromEntries(
+    Object.entries(imageModels).filter(([_, model]) => model.enabled !== false)
+  );
 
-    if (typeof imageModels !== 'object') {
-      console.error('imageModels is not an object:', typeof imageModels);
-      return {};
-    }
-
-    // Debug: Log all models
-    console.log('[getEnabledImageModels] Total models:', Object.keys(imageModels).length);
-    console.log('[getEnabledImageModels] Model keys:', Object.keys(imageModels));
-
-    // Verificar se Object.entries está disponível
-    if (typeof Object.entries !== 'function') {
-      console.error('Object.entries is not available');
-      return {};
-    }
-
-    let entries;
-    try {
-      entries = Object.entries(imageModels);
-    } catch (entriesError) {
-      console.error('Error calling Object.entries:', entriesError);
-      return {};
-    }
-
-    if (!Array.isArray(entries)) {
-      console.error('Object.entries did not return an array:', entries);
-      return {};
-    }
-
-    // Filtrar com verificações de segurança
-    const filtered = entries.filter(([key, model]) => {
-      if (!key || typeof key !== 'string') {
-        console.warn('Invalid model key:', key);
-        return false;
-      }
-
-      if (!model || typeof model !== 'object') {
-        console.warn('Invalid model object for key:', key);
-        return false;
-      }
-
-      // Modelo habilitado se enabled !== false (padrão é true)
-      const isEnabled = model.enabled !== false;
-
-      // Debug: Log each model's status
-      if (key.includes('nano-banana')) {
-        console.log(`[getEnabledImageModels] ${key}:`, {
+  // Development-only logging (removed in production builds)
+  if (process.env.NODE_ENV === 'development') {
+    const nanoModels = Object.entries(enabled).filter(([key]) => key.includes('nano-banana'));
+    if (nanoModels.length > 0) {
+      console.log('[getEnabledImageModels] Nano-banana models:',
+        nanoModels.map(([key, model]) => ({
+          key,
           label: model.label,
-          enabled: model.enabled,
-          isEnabled,
-        });
-      }
-
-      return isEnabled;
-    });
-
-    console.log('[getEnabledImageModels] Filtered models:', filtered.length);
-    console.log('[getEnabledImageModels] Filtered keys:', filtered.map(([key]) => key));
-
-    // Verificar se Object.fromEntries está disponível
-    if (typeof Object.fromEntries !== 'function') {
-      console.error('Object.fromEntries is not available');
-      // Fallback manual
-      const result: Record<string, TersaImageModel> = {};
-      filtered.forEach(([key, model]) => {
-        result[key] = model;
-      });
-      return result;
+          chef: model.chef?.id,
+        }))
+      );
     }
-
-    return Object.fromEntries(filtered);
-  } catch (error) {
-    console.error('Unexpected error in getEnabledImageModels:', error);
-    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
-    return {};
+    console.log('[getEnabledImageModels] Total enabled:', Object.keys(enabled).length);
   }
+
+  return enabled;
 };
 
 /**
- * Retorna todos os modelos de imagem (incluindo desabilitados)
- * Use esta função para administração ou configuração
+ * Returns all image models including disabled ones
+ * Use for administration or configuration purposes
  */
 export const getAllImageModels = (): Record<string, TersaImageModel> => {
-  if (!imageModels || typeof imageModels !== 'object') {
-    console.error('imageModels is not properly initialized:', imageModels);
-    return {};
-  }
   return imageModels;
 };

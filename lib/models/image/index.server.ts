@@ -9,10 +9,10 @@ import { falAIServer } from './fal.server';
 import { kieAIServer } from './kie.server';
 
 /**
- * Image size format: width x height in pixels
- * @example '1024x1024', '768x1024'
+ * Image size format: width x height in pixels OR aspect ratio
+ * @example '1024x1024', '768x1024', '16:9', '1:1'
  */
-export type ImageSize = `${number}x${number}`;
+export type ImageSize = `${number}x${number}` | `${number}:${number}` | 'auto';
 
 /**
  * Cost calculation parameters for image generation
@@ -39,7 +39,7 @@ type TersaImageModel = TersaModel & {
     })[];
     sizes?: ImageSize[];
     supportsEdit?: boolean;
-    providerOptions?: Record<string, Record<string, string>>;
+    providerOptions?: Record<string, Record<string, any>>; // Changed from string to any to support editModelId
     enabled?: boolean;
 };
 
@@ -47,6 +47,25 @@ type TersaImageModel = TersaModel & {
  * Standard image sizes supported by most models
  */
 const STANDARD_IMAGE_SIZES: ImageSize[] = ['1024x1024', '768x1024', '1024x768', '512x512'];
+
+/**
+ * Image sizes for KIE.ai models (aspect ratio format)
+ * KIE.ai Nano Banana supports these aspect ratios directly
+ * Format: "W:H" (aspect ratio, not pixels)
+ */
+const KIE_ASPECT_RATIOS: ImageSize[] = [
+    '1:1',
+    '9:16',
+    '16:9',
+    '3:4',
+    '4:3',
+    '3:2',
+    '2:3',
+    '5:4',
+    '4:5',
+    '21:9',
+    'auto',
+];
 
 /**
  * Helper to create a Fal AI image model configuration
@@ -91,6 +110,21 @@ function createFalImageModel(
 
 /**
  * Helper to create a Kie AI image model configuration
+ * Supports automatic model switching between generation and edit modes
+ * 
+ * @param modelId - The primary model ID for generation
+ * @param config - Configuration object
+ * @param config.editModelId - Optional alternative model for edit operations
+ * 
+ * @example
+ * ```typescript
+ * // Model that uses different endpoints for generation vs editing
+ * createKieImageModel('google/nano-banana', {
+ *   label: 'Nano Banana',
+ *   cost: 0.03,
+ *   editModelId: 'google/nano-banana-edit', // Automatically used for edits
+ * })
+ * ```
  */
 function createKieImageModel(
     modelId: Parameters<typeof kieAIServer.image>[0],
@@ -100,6 +134,8 @@ function createKieImageModel(
         enabled?: boolean;
         priceIndicator?: PriceBracket;
         sizes?: ImageSize[];
+        /** Alternative model ID to use for edit operations (image-to-image) */
+        editModelId?: Parameters<typeof kieAIServer.image>[0];
     }
 ): TersaImageModel {
     const model: TersaImageModel = {
@@ -114,6 +150,14 @@ function createKieImageModel(
         ],
         sizes: config.sizes ?? STANDARD_IMAGE_SIZES,
         enabled: config.enabled ?? true,
+        // Automatically enable edit support if editModelId is provided
+        supportsEdit: !!config.editModelId,
+        // Store the edit model as metadata for runtime model switching
+        providerOptions: config.editModelId ? {
+            kie: {
+                editModelId: config.editModelId,
+            },
+        } : undefined,
     };
 
     if (config.priceIndicator) {
@@ -180,5 +224,7 @@ export const imageModelsServer: Record<string, TersaImageModel> = {
         label: '🍌 Nano Banana (Kie.ai)',
         cost: 0.03,
         priceIndicator: 'low',
+        sizes: KIE_ASPECT_RATIOS, // Use aspect ratios directly (1:1, 9:16, etc)
+        editModelId: 'google/nano-banana-edit', // Usa modelo de edição quando há imagem
     }),
 };

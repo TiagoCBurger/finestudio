@@ -3,9 +3,6 @@ import { env } from '@/lib/env';
 import type { ImageModel, ImageModelCallWarning } from 'ai';
 import { currentUser } from '@/lib/auth';
 import { createFalJob } from '@/lib/fal-jobs';
-import { database } from '@/lib/database';
-import { falJobs } from '@/schema';
-import { eq } from 'drizzle-orm';
 
 const models = [
     'fal-ai/nano-banana/edit',
@@ -162,23 +159,32 @@ export const falAIServer = {
             let result: FalImageOutput;
 
             if (useWebhook) {
-                // Modo webhook: salvar job ANTES de submeter para evitar race condition
+                // Modo webhook: submeter primeiro e criar job depois para evitar race condition
                 const user = await currentUser();
                 if (!user) {
                     throw new Error('User not authenticated');
                 }
 
-                // Gerar um request_id temporário para salvar o job primeiro
-                const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-
-                console.log('Pre-creating job to avoid race condition...');
-
                 // Extrair metadados do providerOptions
                 const nodeId = providerOptions?.fal?.nodeId;
                 const projectId = providerOptions?.fal?.projectId;
 
+                console.log('🚀 Submitting to fal.ai queue...');
+
+                // Submeter para a fila PRIMEIRO
+                const submission = await fal.queue.submit(modelId, {
+                    input,
+                    webhookUrl,
+                });
+
+                const request_id = submission.request_id;
+
+                console.log('✅ Fal.ai queue submitted:', { request_id, useWebhook });
+
+                // Criar job no banco DEPOIS com o request_id real
+                // Isso evita race condition onde webhook chega antes do job existir
                 const jobId = await createFalJob({
-                    requestId: tempRequestId,
+                    requestId: request_id,
                     userId: user.id,
                     modelId,
                     type: 'image',
@@ -192,23 +198,7 @@ export const falAIServer = {
                     },
                 });
 
-                console.log('Job pre-created with ID:', jobId);
-
-                // Agora submeter para a fila
-                const submission = await fal.queue.submit(modelId, {
-                    input,
-                    webhookUrl,
-                });
-
-                const request_id = submission.request_id;
-
-                console.log('Fal.ai queue submitted:', { request_id, useWebhook });
-
-                // Atualizar o job com o request_id real
-                await database
-                    .update(falJobs)
-                    .set({ requestId: request_id })
-                    .where(eq(falJobs.id, jobId));
+                console.log('✅ Job created with ID:', jobId);
 
                 // IMPORTANTE: Retornar estrutura compatível com AI SDK
                 // O AI SDK espera pelo menos uma imagem, então retornamos um placeholder vazio

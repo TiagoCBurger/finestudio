@@ -203,31 +203,46 @@ export function useQueueMonitor({
                     const existingJob = prevJobs.find(j => j.id === newJob.id);
                     if (existingJob && existingJob.status !== newJob.status) {
                         if (newJob.status === 'completed') {
-                            toast.success('Geração completada com sucesso!', {
-                                description: `${newJob.type === 'image' ? 'Imagem' : 'Vídeo'} - ${newJob.modelId}`
+                            // ✅ Sucesso - NÃO mostrar toast aqui
+                            // O componente já mostra toast quando a imagem carrega
+                            console.log('✅ Job completed:', {
+                                jobId: newJob.id,
+                                requestId: newJob.requestId,
+                                type: newJob.type,
+                                modelId: newJob.modelId
                             });
                         } else if (newJob.status === 'failed') {
-                            // 🔧 MELHORIA: Filtrar erros que são falsos positivos
+                            // 🔧 FILTRO MELHORADO: Não mostrar erros relacionados a nós removidos
                             const errorMessage = newJob.error || '';
-                            const isNodeNotFoundError = errorMessage.includes('Node not found') ||
-                                errorMessage.includes('Target node') ||
-                                errorMessage.includes('not found in project');
 
-                            // Se for erro relacionado a nó não encontrado, pode ser falso positivo
-                            // Isso acontece quando o webhook tenta atualizar um nó que foi removido
-                            if (isNodeNotFoundError) {
-                                console.warn('⚠️ Suprimindo toast de erro para job failed com "node not found":', {
+                            // Lista de padrões que indicam falsos positivos (nó foi removido)
+                            const falsePositivePatterns = [
+                                'Node not found',
+                                'Target node',
+                                'not found in project',
+                                'Invalid project content structure',
+                                'Project not found',
+                                'may have been deleted'
+                            ];
+
+                            const isFalsePositive = falsePositivePatterns.some(pattern =>
+                                errorMessage.includes(pattern)
+                            );
+
+                            if (isFalsePositive) {
+                                console.warn('⚠️ Suprimindo toast de erro (falso positivo):', {
                                     jobId: newJob.id,
                                     requestId: newJob.requestId,
                                     error: errorMessage,
-                                    reason: 'Possível falso positivo - nó pode ter sido removido após job criado'
+                                    reason: 'Nó foi removido após job criado'
                                 });
-
-                                // Não exibir toast de erro para estes casos
-                                return;
+                                // Não exibir toast, apenas logar
+                                return prevJobs.map(job =>
+                                    job.id === newJob.id ? newJob : job
+                                );
                             }
 
-                            // Para outros erros reais, exibir normalmente
+                            // ❌ Erro real - mostrar ao usuário
                             toast.error('Erro na geração', {
                                 description: errorMessage || 'Falha ao processar requisição'
                             });

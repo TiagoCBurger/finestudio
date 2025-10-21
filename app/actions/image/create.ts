@@ -71,6 +71,18 @@ const _generateImageAction = async ({
         }
       }
 
+      const isFalProvider = provider.model.provider === 'fal';
+      const isKieProvider = provider.model.provider === 'kie';
+
+      console.log('🔍 Provider detection:', {
+        modelId,
+        provider: provider.model.provider,
+        isFalProvider,
+        isKieProvider,
+        nodeId,
+        projectId,
+      });
+
       const generatedImageResponse = await generateImage({
         model: provider.model,
         prompt: [
@@ -84,12 +96,21 @@ const _generateImageAction = async ({
         ].join('\n'),
         size: size as never,
         aspectRatio,
-        providerOptions: {
-          fal: {
-            nodeId, // Para atualização do project via webhook
-            projectId, // Para atualização do project via webhook
-          },
-        },
+        providerOptions: isFalProvider
+          ? {
+            fal: {
+              nodeId, // Para atualização do project via webhook
+              projectId, // Para atualização do project via webhook
+            },
+          }
+          : isKieProvider
+            ? {
+              kie: {
+                nodeId,
+                projectId,
+              },
+            }
+            : undefined,
       });
 
       // Rastreamento de créditos removido
@@ -98,9 +119,71 @@ const _generateImageAction = async ({
       responseHeaders = (generatedImageResponse as any).response?.headers || {};
 
       // Verificar se está em modo webhook ANTES de tentar acessar image
-      const isPending = responseHeaders['x-fal-status'] === 'pending';
+      const isFalPending = responseHeaders['x-fal-status'] === 'pending';
+      const isKiePending = responseHeaders['x-kie-status'] === 'pending';
+      const isPending = isFalPending || isKiePending;
+
+      console.log('Checking pending status:', {
+        isPending,
+        isFalPending,
+        isKiePending,
+        hasHeaders: !!responseHeaders,
+        falStatus: responseHeaders['x-fal-status'],
+        kieStatus: responseHeaders['x-kie-status'],
+        falRequestId: responseHeaders['x-fal-request-id'],
+        kieRequestId: responseHeaders['x-kie-request-id'],
+        hasImage: !!generatedImageResponse.image,
+      });
 
       if (isPending) {
+        console.log('✅ Image generation pending, returning placeholder for webhook polling');
+
+        const requestId = responseHeaders['x-fal-request-id'] || responseHeaders['x-kie-request-id'];
+
+        // Atualizar o nó no content para persistir o estado de loading
+        const project = await database.query.projects.findFirst({
+          where: eq(projects.id, projectId),
+        });
+
+        if (project) {
+          const content = project.content as {
+            nodes: Node[];
+            edges: Edge[];
+            viewport: Viewport;
+          };
+
+          if (content && Array.isArray(content.nodes)) {
+            const updatedNodes = content.nodes.map((node) => {
+              if (node.id === nodeId) {
+                return {
+                  ...node,
+                  data: {
+                    ...(node.data ?? {}),
+                    generated: {
+                      url: '', // URL vazia, será preenchida pelo webhook
+                      type: 'image/png',
+                      headers: responseHeaders,
+                    },
+                    loading: true,
+                    status: 'generating',
+                    requestId,
+                    updatedAt: new Date().toISOString(),
+                  },
+                };
+              }
+              return node;
+            });
+
+            await database
+              .update(projects)
+              .set({
+                content: { ...content, nodes: updatedNodes },
+                updatedAt: new Date(),
+              })
+              .where(eq(projects.id, projectId));
+          }
+        }
+
         return {
           nodeData: {
             generated: {
@@ -109,6 +192,8 @@ const _generateImageAction = async ({
               headers: responseHeaders,
             },
             loading: true, // Flag para manter loading state
+            status: 'generating',
+            requestId,
             updatedAt: new Date().toISOString(),
           },
         };

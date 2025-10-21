@@ -245,7 +245,21 @@ export const POST = async (req: Request) => {
 
                     if (!project) {
                         console.warn('⚠️ Project not found:', projectId);
-                        console.warn('   This may cause "Node not found" errors in the frontend');
+                        console.warn('   Project may have been deleted');
+
+                        // Marcar job como completed (não failed) para evitar toasts de erro
+                        await database
+                            .update(falJobs)
+                            .set({
+                                status: 'completed',
+                                result: {
+                                    ...result,
+                                    _note: 'Project was deleted before webhook completed'
+                                },
+                                completedAt: new Date(),
+                            })
+                            .where(eq(falJobs.requestId, payload.request_id));
+
                         return NextResponse.json({ success: true }, { status: 200 });
                     }
 
@@ -266,6 +280,20 @@ export const POST = async (req: Request) => {
                             nodesType: content ? typeof content.nodes : 'N/A',
                             isNodesArray: content ? Array.isArray(content.nodes) : false
                         });
+
+                        // Marcar job como completed (não failed) para evitar toasts de erro
+                        await database
+                            .update(falJobs)
+                            .set({
+                                status: 'completed',
+                                result: {
+                                    ...result,
+                                    _note: 'Project content structure invalid'
+                                },
+                                completedAt: new Date(),
+                            })
+                            .where(eq(falJobs.requestId, payload.request_id));
+
                         return NextResponse.json({ success: true }, { status: 200 });
                     }
 
@@ -282,15 +310,19 @@ export const POST = async (req: Request) => {
                             projectId,
                             availableNodes: content.nodes.map((n: any) => ({ id: n.id, type: n.type }))
                         });
-                        console.warn('   This is likely the cause of "Node not found" errors');
                         console.warn('   The node may have been deleted after the job was created');
+                        console.warn('   Marking job as completed (silently) to avoid false error notifications');
 
-                        // Marcar o job como failed com uma mensagem específica
+                        // ✅ MELHORIA: Marcar como completed (não failed) para evitar toasts de erro
+                        // O nó foi removido pelo usuário, não é um erro real
                         await database
                             .update(falJobs)
                             .set({
-                                status: 'failed',
-                                error: `Target node ${nodeId} not found in project ${projectId}. Node may have been deleted.`,
+                                status: 'completed',
+                                result: {
+                                    ...result,
+                                    _note: 'Node was deleted before webhook completed'
+                                },
                                 completedAt: new Date(),
                             })
                             .where(eq(falJobs.requestId, payload.request_id));
@@ -355,19 +387,22 @@ export const POST = async (req: Request) => {
                 }
             } catch (projectUpdateError) {
                 console.error('❌ Failed to update project:', projectUpdateError);
-                console.error('   This may cause "Node not found" errors in the frontend');
 
-                // Marcar o job como failed se a atualização do projeto falhar
+                // ✅ MELHORIA: Marcar como completed (não failed) para evitar toasts de erro
+                // O job foi processado com sucesso, apenas a atualização do projeto falhou
                 await database
                     .update(falJobs)
                     .set({
-                        status: 'failed',
-                        error: `Failed to update project: ${projectUpdateError instanceof Error ? projectUpdateError.message : projectUpdateError}`,
+                        status: 'completed',
+                        result: {
+                            ...result,
+                            _note: `Project update failed: ${projectUpdateError instanceof Error ? projectUpdateError.message : projectUpdateError}`
+                        },
                         completedAt: new Date(),
                     })
                     .where(eq(falJobs.requestId, payload.request_id));
 
-                // Não falhar o webhook, mas logar o erro
+                // Não falhar o webhook, apenas logar
             }
         }
 

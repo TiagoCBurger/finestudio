@@ -27,7 +27,21 @@ type ImageSizeSelectorProps = {
 };
 
 const getIcon = (option: string) => {
-  const [width, height] = option.split('x').map(Number);
+  // Check if it's aspect ratio format (e.g., "16:9") or pixel format (e.g., "1024x768")
+  const isAspectRatio = option.includes(':');
+
+  let width: number, height: number;
+
+  if (isAspectRatio) {
+    // Parse aspect ratio (e.g., "16:9")
+    if (option === 'auto') {
+      return <SquareIcon size={16} className="text-muted-foreground" />;
+    }
+    [width, height] = option.split(':').map(Number);
+  } else {
+    // Parse pixel dimensions (e.g., "1024x768")
+    [width, height] = option.split('x').map(Number);
+  }
 
   if (width === height) {
     return <SquareIcon size={16} className="text-muted-foreground" />;
@@ -43,8 +57,20 @@ const getIcon = (option: string) => {
 };
 
 const getLabel = (option: string) => {
-  const [width, height] = option.split('x').map(Number);
+  // Check if it's aspect ratio format (e.g., "16:9") or pixel format (e.g., "1024x768")
+  const isAspectRatio = option.includes(':');
 
+  if (isAspectRatio) {
+    // Display aspect ratio as-is
+    return (
+      <div className="flex items-center gap-1 truncate">
+        <span>{option}</span>
+      </div>
+    );
+  }
+
+  // Display pixel dimensions
+  const [width, height] = option.split('x').map(Number);
   return (
     <div className="flex items-center gap-1 truncate">
       <span>{width}</span>

@@ -3,6 +3,18 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   images: {
     formats: ['image/avif', 'image/webp'],
+    // Cache settings for external storage (R2, Supabase)
+    minimumCacheTTL: 60, // Cache optimized images for 60 seconds
+    // Responsive image sizes for different devices
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+    // Enable optimization with extended timeout for AI-generated content
+    unoptimized: false,
+    // Increase timeout for external image fetching (R2 signed URLs)
+    minimumCacheTTL: 60 * 60 * 24 * 7, // 7 days to match R2 signed URL expiration
+    dangerouslyAllowSVG: false,
+    contentDispositionType: 'attachment',
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     remotePatterns: [
       // Supabase storage, production
       {
@@ -33,18 +45,16 @@ const nextConfig: NextConfig = {
       // Cloudflare R2 storage - signed URLs with path-style (works without public access)
       {
         protocol: 'https',
-        hostname: '53e47c76330e4238bb188ab59c62bf82.r2.cloudflarestorage.com',
+        hostname: '*.r2.cloudflarestorage.com',
       },
       // Cloudflare R2 storage - public endpoint (if enabled)
       {
         protocol: 'https',
-        hostname: 'pub-53e47c76330e4238bb188ab59c62bf82.r2.dev',
+        hostname: '*.r2.dev',
       },
-      // Cloudflare R2 storage - additional public endpoint
-      {
-        protocol: 'https',
-        hostname: 'pub-fc1a8343fa6d4aa485c79384d30027c5.r2.dev',
-      },
+      // Custom R2 domain (if R2_PUBLIC_URL is configured)
+      // Add your custom domain here if using a CNAME for R2
+      // Example: { protocol: 'https', hostname: 'cdn.yourdomain.com' },
     ],
   },
 

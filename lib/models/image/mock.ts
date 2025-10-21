@@ -39,10 +39,17 @@ export const mockAI = {
 
                 console.log('[MOCK] Imagens geradas:', images);
 
+                // Converter para formato esperado (array de strings)
+                const imageUrls = images.map(img => img.url);
+
                 return {
-                    images,
-                    finishReason: 'stop' as const,
-                    warnings: ['⚠️ Usando provider MOCK - Imagens de teste'],
+                    images: imageUrls,
+                    warnings: [],
+                    response: {
+                        id: `mock-${Date.now()}`,
+                        timestamp: new Date(),
+                        modelId,
+                    },
                 };
             },
         };

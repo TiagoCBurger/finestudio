@@ -68,7 +68,7 @@ export const VideoTransform = ({
 }: VideoTransformProps) => {
   const { updateNodeData, getNodes, getEdges } = useReactFlow();
   // 🔧 Inicializar loading baseado no estado persistido no banco
-  const [loading, setLoading] = useState(data.loading === true || data.status === 'pending');
+  const [loading, setLoading] = useState((data as any).loading === true || (data as any).status === 'pending');
   const [previousUrl, setPreviousUrl] = useState(data.generated?.url || '');
   const [shouldShowSuccessToast, setShouldShowSuccessToast] = useState(false);
   const [localInstructions, setLocalInstructions] = useState(
@@ -114,7 +114,7 @@ export const VideoTransform = ({
       console.log('[Video Transform] Syncing loading state from database: true');
       setLoading(true);
     }
-  }, [data.loading, data.status, loading]);
+  }, [(data as any).loading, (data as any).status, loading]);
 
   // Detect when video generation completes via Realtime
   useEffect(() => {

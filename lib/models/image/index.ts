@@ -6,7 +6,6 @@ import {
 import type { ImageModel } from 'ai';
 import { falAI } from './fal';
 import { kieAI } from './kie';
-import { mockAI } from './mock';
 
 export type ImageSize = `${number}x${number}` | `${number}:${number}` | 'auto';
 
@@ -40,7 +39,6 @@ const validateProvider = (provider: unknown, name: string): void => {
 // Validate all providers at module load time
 validateProvider(falAI, 'falAI');
 validateProvider(kieAI, 'kieAI');
-validateProvider(mockAI, 'mockAI');
 
 // Standard image sizes supported by most models
 const STANDARD_SIZES: ImageSize[] = ['1024x1024', '768x1024', '1024x768', '512x512'];
@@ -61,39 +59,6 @@ const KIE_ASPECT_RATIOS: ImageSize[] = [
 ];
 
 export const imageModels: Record<string, TersaImageModel> = {
-  // 🧪 MOCK - Test models with no cost
-  'mock-fast': {
-    label: '🧪 Mock Fast (Free Test)',
-    chef: providers.mock,
-    providers: [
-      {
-        ...providers.mock,
-        model: mockAI.image('mock-fast'),
-        getCost: () => 0,
-      },
-    ],
-    sizes: STANDARD_SIZES,
-    priceIndicator: 'low',
-    supportsEdit: false,
-    default: false,
-    enabled: true,
-  },
-  'mock-edit': {
-    label: '🧪 Mock Edit (Test Editing)',
-    chef: providers.mock,
-    providers: [
-      {
-        ...providers.mock,
-        model: mockAI.image('mock-edit'),
-        getCost: () => 0,
-      },
-    ],
-    sizes: STANDARD_SIZES,
-    priceIndicator: 'low',
-    supportsEdit: true,
-    default: false,
-    enabled: true,
-  },
   // 🍌 NANO BANANA - Fast and economical image editing model
   'fal-nano-banana': {
     label: '🍌 Nano Banana (Fal)',

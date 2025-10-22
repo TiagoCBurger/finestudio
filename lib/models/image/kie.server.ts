@@ -246,8 +246,8 @@ export const kieAIServer = {
                 .where(eq(falJobs.id, jobId));
 
             // Retornar estrutura compatível com AI SDK
+            // IMPORTANTE: NÃO incluir 'images' para forçar modo webhook
             return {
-                images: [new Uint8Array(0)], // Placeholder vazio para indicar modo webhook
                 warnings: [],
                 response: {
                     timestamp: new Date(),
@@ -257,7 +257,7 @@ export const kieAIServer = {
                         'x-kie-status': 'pending',
                     },
                 },
-            };
+            } as any;
         },
     }),
 };

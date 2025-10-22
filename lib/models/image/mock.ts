@@ -49,6 +49,7 @@ export const mockAI = {
                         id: `mock-${Date.now()}`,
                         timestamp: new Date(),
                         modelId,
+                        headers: undefined,
                     },
                 };
             },

@@ -28,9 +28,9 @@ export const createClient = () => {
       heartbeatIntervalMs: 30000,
 
       // Exponential backoff para reconnection: 1s, 2s, 4s, 8s, 16s, max 30s
-      reconnectAfterMs: (tries) => {
+      reconnectAfterMs: (tries: number) => {
         const delay = Math.min(1000 * Math.pow(2, tries), 30000);
-        realtimeLogger.log('info', 'Reconnection attempt', { tries, delay });
+        realtimeLogger.info('Reconnection attempt', { tries, delay });
         return delay;
       }
     }

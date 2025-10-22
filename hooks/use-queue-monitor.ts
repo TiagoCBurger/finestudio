@@ -80,6 +80,7 @@ interface UseQueueMonitorReturn {
     isLoading: boolean;
     error: Error | null;
     refresh: () => Promise<void>;
+    addJobOptimistically: (job: FalJob) => void;
     removeJob: (jobId: string) => void;
     clearCompleted: () => void;
     clearFailed: () => void;
@@ -180,6 +181,15 @@ export function useQueueMonitor({
 
         const { type, new: newJob, old: oldJob } = payload;
 
+        console.log('🔔 [QueueMonitor] Job update received:', {
+            userId,
+            type,
+            jobId: newJob?.id || oldJob?.id,
+            oldStatus: oldJob?.status,
+            newStatus: newJob?.status,
+            timestamp: new Date().toISOString()
+        });
+
         realtimeLogger.info('Job update received', {
             userId,
             type,
@@ -265,10 +275,33 @@ export function useQueueMonitor({
         });
     }, [userId]);
 
+    // Add job optimistically (before Realtime update)
+    const addJobOptimistically = useCallback((job: FalJob) => {
+        console.log('➕ [QueueMonitor] Adding job optimistically:', {
+            jobId: job.id,
+            requestId: job.requestId,
+            status: job.status,
+            type: job.type
+        });
+
+        setJobs(prevJobs => {
+            // Check if job already exists
+            if (prevJobs.some(j => j.id === job.id)) {
+                console.warn('⚠️ [QueueMonitor] Job already exists, skipping:', job.id);
+                return prevJobs;
+            }
+            // Add new job at the beginning
+            return [job, ...prevJobs];
+        });
+    }, []);
+
     // Remove job from local state (UI only)
     const removeJob = useCallback((jobId: string) => {
         setJobs(prevJobs => prevJobs.filter(job => job.id !== jobId));
-        realtimeLogger.info('Job removed from view', { userId, jobId });
+        realtimeLogger.info('Job removed from view', {
+            userId,
+            jobId
+        });
     }, [userId]);
 
     // Clear all completed jobs from local state
@@ -600,6 +633,7 @@ export function useQueueMonitor({
         isLoading,
         error,
         refresh: fetchJobs,
+        addJobOptimistically,
         removeJob,
         clearCompleted,
         clearFailed

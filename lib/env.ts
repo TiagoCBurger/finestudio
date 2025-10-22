@@ -14,7 +14,7 @@ export const env = createEnv({
 
     // Supabase Integration (Obrigatório)
     POSTGRES_URL: z.string().url().min(1),
-    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(), // Opcional - não usado atualmente
     SUPABASE_AUTH_HOOK_SECRET: z.string().min(1).optional(),
 
     // Cloudflare R2 Configuration

@@ -3,15 +3,13 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   images: {
     formats: ['image/avif', 'image/webp'],
-    // Cache settings for external storage (R2, Supabase)
-    minimumCacheTTL: 60, // Cache optimized images for 60 seconds
     // Responsive image sizes for different devices
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
     // Enable optimization with extended timeout for AI-generated content
     unoptimized: false,
-    // Increase timeout for external image fetching (R2 signed URLs)
-    minimumCacheTTL: 60 * 60 * 24 * 7, // 7 days to match R2 signed URL expiration
+    // Cache settings for external storage - 7 days to match R2 signed URL expiration
+    minimumCacheTTL: 60 * 60 * 24 * 7,
     dangerouslyAllowSVG: false,
     contentDispositionType: 'attachment',
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",

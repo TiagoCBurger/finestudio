@@ -14,7 +14,7 @@ export const env = createEnv({
 
     // Supabase Integration (Obrigatório)
     POSTGRES_URL: z.string().url().min(1),
-    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(), // Opcional - não usado atualmente
+    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     SUPABASE_AUTH_HOOK_SECRET: z.string().min(1).optional(),
 
     // Cloudflare R2 Configuration
@@ -46,6 +46,9 @@ export const env = createEnv({
     AI_GATEWAY_API_KEY: z.string().min(1).optional(),
   },
   client: {
+    // URL da aplicação (necessário para webhooks em produção)
+    NEXT_PUBLIC_APP_URL: z.string().url().min(1).optional(),
+
     // Opcional - Analytics e Captcha
     NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1).optional(),
     NEXT_PUBLIC_POSTHOG_KEY: z.string().min(1).optional(),
@@ -56,6 +59,7 @@ export const env = createEnv({
     NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   },
   runtimeEnv: {
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     XAI_API_KEY: process.env.XAI_API_KEY,

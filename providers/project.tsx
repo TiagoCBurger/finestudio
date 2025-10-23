@@ -59,14 +59,15 @@ export const ProjectProvider = ({
       fallbackData: initialData, // Use initial SSR data
       revalidateOnFocus: false, // Don't revalidate on window focus
       revalidateOnReconnect: true, // Revalidate on reconnect
-      dedupingInterval: 1000, // Dedupe requests within 1 second
+      dedupingInterval: 100, // Reduzido para 100ms para resposta mais rápida
       // Log when SWR revalidates
       onSuccess: (data) => {
         console.log('📊 [ProjectProvider] SWR revalidated successfully', {
           projectId: initialData.id,
           hasContent: !!data?.content,
           nodeCount: (data?.content as any)?.nodes?.length || 0,
-          updatedAt: data?.updatedAt
+          updatedAt: data?.updatedAt,
+          timestamp: new Date().toISOString()
         });
       },
       onError: (err) => {
@@ -82,7 +83,8 @@ export const ProjectProvider = ({
             oldNodeCount: (a?.content as any)?.nodes?.length || 0,
             newNodeCount: (b?.content as any)?.nodes?.length || 0,
             oldUpdatedAt: a?.updatedAt,
-            newUpdatedAt: b?.updatedAt
+            newUpdatedAt: b?.updatedAt,
+            timestamp: new Date().toISOString()
           });
         }
         return isSame;

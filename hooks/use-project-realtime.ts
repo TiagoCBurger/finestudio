@@ -161,11 +161,22 @@ export function useProjectRealtime(projectId: string | undefined): UseProjectRea
 
         // Revalidate SWR cache to update UI
         try {
-            realtimeLogger.info('Revalidating project cache', { projectId });
-            mutate(`/api/projects/${projectId}`);
-            realtimeLogger.success('Project cache revalidated successfully', { projectId });
+            const timestamp = new Date().toISOString();
+            realtimeLogger.info('🔄 Calling mutate() to revalidate project cache', {
+                projectId,
+                cacheKey: `/api/projects/${projectId}`,
+                timestamp
+            });
+
+            // Force revalidation with revalidate: true
+            mutate(`/api/projects/${projectId}`, undefined, { revalidate: true });
+
+            realtimeLogger.success('✅ mutate() called successfully', {
+                projectId,
+                timestamp
+            });
         } catch (error) {
-            realtimeLogger.error('Error revalidating project cache', realtimeLogger.createContext({
+            realtimeLogger.error('❌ Error calling mutate()', realtimeLogger.createContext({
                 projectId,
                 error: error instanceof Error ? error.message : error,
                 hint: 'Check SWR configuration and API endpoint availability'
@@ -360,24 +371,40 @@ export function useProjectRealtime(projectId: string | undefined): UseProjectRea
                         return;
                     }
 
+                    // Debug: Log session details
+                    realtimeLogger.debugConnectionState(`project:${projectId}`, {
+                        hasSession: true,
+                        sessionExpiry: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown',
+                        retryCount: state.retryCount
+                    });
+
                     realtimeLogger.info('✅ Session found, setting auth for realtime', realtimeLogger.createContext({
                         projectId,
                         sessionUserId: session.user.id,
                         sessionExpiresAt: session.expires_at,
+                        sessionExpiresIn: session.expires_at ? Math.floor((session.expires_at * 1000 - Date.now()) / 1000) + 's' : 'unknown',
                         retryCount: state.retryCount
                     }));
 
                     // Set auth with the current session token
-                    return supabase.realtime.setAuth(session.access_token);
-                })
-                .then(() => {
-                    realtimeLogger.info('🔐 Auth set for realtime, subscribing to channel', realtimeLogger.createContext({
+                    supabase.realtime.setAuth(session.access_token);
+
+                    realtimeLogger.info('🔐 Auth set for realtime, waiting 2s before subscribing', realtimeLogger.createContext({
                         projectId,
                         channelTopic: `project:${projectId}`,
                         retryCount: state.retryCount
                     }));
 
-                    // Subscribe after auth is set
+                    // Wait 2 seconds for auth to propagate to Realtime server (increased from 1s)
+                    return new Promise(resolve => setTimeout(resolve, 2000));
+                })
+                .then(() => {
+                    realtimeLogger.info('⏰ Delay complete, subscribing to channel now', {
+                        projectId,
+                        channelTopic: `project:${projectId}`
+                    });
+
+                    // Subscribe after auth is set and delay
                     return channel.subscribe((status, err) => {
                         const logContext = realtimeLogger.createContext({
                             projectId,

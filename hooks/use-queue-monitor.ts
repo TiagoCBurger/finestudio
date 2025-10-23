@@ -350,6 +350,15 @@ export function useQueueMonitor({
             return;
         }
 
+        // Check if channel already exists and is subscribed
+        if (channelRef.current?.state === REALTIME_CHANNEL_STATES.joined) {
+            realtimeLogger.info('Channel already subscribed, skipping setup', {
+                userId,
+                channelState: channelRef.current.state
+            });
+            return;
+        }
+
         // Debounce subscription attempts to prevent rapid re-subscriptions
         realtimeLogger.info('Scheduling subscription attempt with debounce', {
             userId,
@@ -476,6 +485,7 @@ export function useQueueMonitor({
                         realtimeLogger.error('Error getting session', {
                             userId,
                             error: sessionError.message,
+                            errorCode: sessionError.code,
                             retryCount: state.retryCount
                         });
                         subscriptionStateRef.current.isSubscribing = false;
@@ -492,22 +502,38 @@ export function useQueueMonitor({
                         return;
                     }
 
+                    // Debug: Log session details
+                    realtimeLogger.debugConnectionState(`fal_jobs:${userId}`, {
+                        hasSession: true,
+                        sessionExpiry: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown',
+                        retryCount: state.retryCount
+                    });
+
                     realtimeLogger.info('Session found, setting auth for realtime', {
                         userId,
                         sessionUserId: session.user.id,
+                        sessionExpiresIn: session.expires_at ? Math.floor((session.expires_at * 1000 - Date.now()) / 1000) + 's' : 'unknown',
                         retryCount: state.retryCount
                     });
 
                     // Set auth with the current session token
-                    return supabase.realtime.setAuth(session.access_token);
-                })
-                .then(() => {
-                    realtimeLogger.info('Auth set for realtime, subscribing to channel', {
+                    supabase.realtime.setAuth(session.access_token);
+
+                    realtimeLogger.info('Auth set for realtime, waiting 2s before subscribing', {
                         userId,
                         retryCount: state.retryCount
                     });
 
-                    // Subscribe after auth is set
+                    // Wait 2 seconds for auth to propagate to Realtime server (increased from 1s)
+                    return new Promise(resolve => setTimeout(resolve, 2000));
+                })
+                .then(() => {
+                    realtimeLogger.info('Delay complete, subscribing to channel now', {
+                        userId,
+                        channelTopic: `fal_jobs:${userId}`
+                    });
+
+                    // Subscribe after auth is set and delay
                     return channel.subscribe((status, err) => {
                         const logContext = {
                             userId,
@@ -596,10 +622,14 @@ export function useQueueMonitor({
                 });
         }, DEBOUNCE_DELAY);
 
-        // Cleanup on unmount or userId change
+        // Cleanup only on unmount or userId change
         return () => {
-            realtimeLogger.info('Cleaning up subscription for fal_jobs', {
+            // Only cleanup if userId actually changed or component unmounting
+            const shouldCleanup = !userId || !enabled;
+
+            realtimeLogger.info('Effect cleanup triggered', {
                 userId,
+                shouldCleanup,
                 channelState: channelRef.current?.state,
                 subscriptionState: subscriptionStateRef.current
             });
@@ -610,22 +640,30 @@ export function useQueueMonitor({
                 debounceTimerRef.current = null;
             }
 
-            // Reset subscription state
-            subscriptionStateRef.current = {
-                isSubscribing: false,
-                isSubscribed: false,
-                retryCount: 0,
-                lastAttemptTimestamp: null
-            };
+            // Only remove channel if we should cleanup (userId changed or disabled)
+            if (shouldCleanup) {
+                realtimeLogger.info('Cleaning up subscription for fal_jobs', {
+                    userId,
+                    reason: !userId ? 'no userId' : 'disabled'
+                });
 
-            // Remove channel
-            if (channelRef.current && supabaseRef.current) {
-                supabaseRef.current.removeChannel(channelRef.current);
-                channelRef.current = null;
-                realtimeLogger.success('Channel removed successfully', { userId });
+                // Reset subscription state
+                subscriptionStateRef.current = {
+                    isSubscribing: false,
+                    isSubscribed: false,
+                    retryCount: 0,
+                    lastAttemptTimestamp: null
+                };
+
+                // Remove channel
+                if (channelRef.current && supabaseRef.current) {
+                    supabaseRef.current.removeChannel(channelRef.current);
+                    channelRef.current = null;
+                    realtimeLogger.success('Channel removed successfully', { userId });
+                }
             }
         };
-    }, [userId, enabled, handleJobUpdate]);
+    }, [userId, enabled]);
 
     return {
         jobs,

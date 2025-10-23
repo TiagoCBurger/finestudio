@@ -100,6 +100,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
       canvasNodeCount: nodes.length,
       canvasEdgeCount: edges.length,
       projectId: project?.id,
+      projectUpdatedAt: project?.updatedAt,
     });
 
     // Compare with current state
@@ -115,17 +116,21 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
       console.log('✅ Content changed via Realtime, updating canvas:', {
         nodesChanged,
         edgesChanged,
+        projectUpdatedAt: project?.updatedAt,
       });
 
+      // FORÇA a atualização do canvas com os novos dados
       setNodes(content.nodes);
       setEdges(content.edges);
+
+      // Update previous content reference AFTER updating state
+      prevContentRef.current = contentString;
     } else {
       console.log('ℹ️ Content unchanged, skipping update');
+      // Still update the ref to avoid repeated checks
+      prevContentRef.current = contentString;
     }
-
-    // Update previous content reference
-    prevContentRef.current = contentString;
-  }, [content, nodes, edges, project?.id]);
+  }, [content, nodes, edges, project?.id, project?.updatedAt]);
 
   const save = useDebouncedCallback(async () => {
     if (saveState.isSaving || !project?.userId || !project?.id) {

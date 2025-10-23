@@ -10,6 +10,7 @@ import { handleError } from '@/lib/error/handle';
 import { imageModels, getEnabledImageModels } from '@/lib/models/image';
 import { getImagesFromImageNodes, getTextFromTextNodes } from '@/lib/xyflow';
 import { useProject } from '@/providers/project';
+import { useQueueMonitorContext } from '@/providers/queue-monitor';
 import { getIncomers, useReactFlow } from '@xyflow/react';
 import {
   ClockIcon,
@@ -66,6 +67,7 @@ export const ImageTransform = ({
   const [lastErrorUrl, setLastErrorUrl] = useState<string | null>(null);
 
   const project = useProject();
+  const { addJobOptimistically } = useQueueMonitorContext();
 
   // Detectar quando webhook completou via Realtime
   useEffect(() => {
@@ -170,20 +172,21 @@ export const ImageTransform = ({
     }
 
     // Garantir que incomers é um array
-    if (!Array.isArray(incomers)) {
+    // Garantir que incomers é sempre um array
+    if (!incomers || !Array.isArray(incomers)) {
       console.warn('⚠️ getIncomers did not return an array:', incomers);
       incomers = [];
     }
 
     // Debug logging para identificar problemas
     console.log('🔍 Debug incomers:', {
-      incomersCount: incomers?.length || 0,
-      incomers: Array.isArray(incomers) ? incomers.map(node => ({
+      incomersCount: incomers.length,
+      incomers: incomers.map(node => ({
         id: node?.id || 'unknown',
         type: node?.type || 'unknown',
         hasData: !!node?.data,
         dataKeys: node?.data ? Object.keys(node.data) : []
-      })) : []
+      }))
     });
 
     let textNodes: string[] = [];
@@ -249,6 +252,7 @@ export const ImageTransform = ({
       const falStatus = nodeData.generated?.headers?.['x-fal-status'];
       const kieRequestId = nodeData.generated?.headers?.['x-kie-request-id'];
       const kieStatus = nodeData.generated?.headers?.['x-kie-status'];
+      const jobId = nodeData.generated?.headers?.['x-job-id'];
 
       const isWebhookMode = (falRequestId && falStatus === 'pending') || (kieRequestId && kieStatus === 'pending');
 
@@ -258,6 +262,32 @@ export const ImageTransform = ({
         // O Realtime vai notificar automaticamente e o useEffect vai ativar o loading
         console.log('🔄 Modo webhook ativado, request_id:', falRequestId || kieRequestId);
         console.log('⏳ Aguardando webhook completar...');
+
+        // ➕ Adicionar job otimisticamente na fila
+        // Isso faz o job aparecer imediatamente no QueueMonitor
+        if (jobId) {
+          console.log('➕ Adicionando job otimisticamente na fila:', jobId);
+          addJobOptimistically({
+            id: jobId,
+            requestId: falRequestId || kieRequestId || '',
+            userId: project.userId,
+            modelId,
+            type: 'image',
+            status: 'pending',
+            input: {
+              prompt: textNodes.join('\n'),
+              _metadata: {
+                nodeId: id,
+                projectId: project.id
+              }
+            },
+            result: null,
+            error: null,
+            createdAt: new Date().toISOString(),
+            completedAt: null
+          });
+        }
+
         // NÃO chamar updateNodeData aqui - deixar o Realtime fazer o trabalho
       } else {
         // ✅ Modo síncrono (sem webhook) - atualizar imediatamente

@@ -255,6 +255,7 @@ export const kieAIServer = {
                     headers: {
                         'x-kie-request-id': request_id,
                         'x-kie-status': 'pending',
+                        'x-job-id': jobId, // Adicionar jobId para atualização otimista da fila
                     },
                 },
             } as any;

@@ -211,6 +211,7 @@ export const falAIServer = {
                         headers: {
                             'x-fal-request-id': request_id,
                             'x-fal-status': 'pending',
+                            'x-job-id': jobId, // Adicionar jobId para atualização otimista da fila
                         },
                     },
                 };

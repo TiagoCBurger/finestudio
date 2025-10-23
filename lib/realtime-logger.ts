@@ -78,6 +78,50 @@ class RealtimeLogger {
             timestamp: new Date().toISOString()
         };
     }
+
+    /**
+     * Log detailed connection state for debugging
+     */
+    debugConnectionState(channelName: string, state: {
+        channelState?: string;
+        isSubscribing?: boolean;
+        isSubscribed?: boolean;
+        retryCount?: number;
+        hasSession?: boolean;
+        sessionExpiry?: string;
+    }) {
+        if (this.isDevelopment) {
+            console.log(`${this.prefix} 🔍 [DEBUG] Connection State for ${channelName}:`, {
+                ...state,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    /**
+     * Log WebSocket connection details
+     */
+    debugWebSocket(details: {
+        readyState?: number;
+        url?: string;
+        protocol?: string;
+        extensions?: string;
+    }) {
+        if (this.isDevelopment) {
+            const readyStateMap: Record<number, string> = {
+                0: 'CONNECTING',
+                1: 'OPEN',
+                2: 'CLOSING',
+                3: 'CLOSED'
+            };
+
+            console.log(`${this.prefix} 🔍 [DEBUG] WebSocket State:`, {
+                ...details,
+                readyStateText: details.readyState !== undefined ? readyStateMap[details.readyState] : 'unknown',
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
 }
 
 // Export singleton instance

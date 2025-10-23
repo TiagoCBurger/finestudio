@@ -211,6 +211,17 @@ export function useProjectRealtime(projectId: string | undefined): UseProjectRea
             return;
         }
 
+        // If channel exists but is not joined, remove it first to prevent duplicate subscription errors
+        if (channelRef.current && channelRef.current.state !== REALTIME_CHANNEL_STATES.joined) {
+            const currentState = channelRef.current.state;
+            realtimeLogger.info('Removing existing channel before creating new one', {
+                projectId,
+                currentChannelState: currentState
+            });
+            supabaseRef.current?.removeChannel(channelRef.current);
+            channelRef.current = null;
+        }
+
         // Debounce subscription attempts to prevent rapid re-subscriptions
         realtimeLogger.info('Scheduling subscription attempt with debounce', {
             projectId,

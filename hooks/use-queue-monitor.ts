@@ -359,6 +359,17 @@ export function useQueueMonitor({
             return;
         }
 
+        // If channel exists but is not joined, remove it first to prevent duplicate subscription errors
+        if (channelRef.current) {
+            const currentState = channelRef.current.state;
+            realtimeLogger.info('Removing existing channel before creating new one', {
+                userId,
+                currentChannelState: currentState
+            });
+            supabaseRef.current?.removeChannel(channelRef.current);
+            channelRef.current = null;
+        }
+
         // Debounce subscription attempts to prevent rapid re-subscriptions
         realtimeLogger.info('Scheduling subscription attempt with debounce', {
             userId,

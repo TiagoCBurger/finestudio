@@ -1,25 +1,28 @@
+/**
+ * KIE.ai Image Provider (Refatorado)
+ * Implementa geração de imagem usando API do KIE.ai
+ * Focado nos modelos Nano Banana e Nano Banana Edit
+ */
+
 import { env } from '@/lib/env';
-import type { ImageModel } from 'ai';
-import { currentUser } from '@/lib/auth';
-import { createFalJob } from '@/lib/fal-jobs';
-import { database } from '@/lib/database';
-import { falJobs } from '@/schema';
-import { eq } from 'drizzle-orm';
-
-const models = [
-    'google/nano-banana',
-    'google/nano-banana-edit',
-] as const;
-
-type KieModel = (typeof models)[number];
+import { ImageProviderBase } from './provider-base';
+import type { ImageGenerationInput } from './types';
 
 /**
- * Maximum number of images supported by KIE.ai edit models
+ * Máximo de imagens suportadas pelo KIE.ai
  */
 const MAX_KIE_IMAGES = 10;
 
 /**
- * Kie.ai API response structure
+ * Modelos KIE.ai suportados
+ */
+const KIE_MODELS = {
+    NANO_BANANA: 'google/nano-banana',
+    NANO_BANANA_EDIT: 'google/nano-banana-edit',
+} as const;
+
+/**
+ * Resposta da API KIE.ai
  */
 interface KieApiResponse {
     data?: {
@@ -30,235 +33,183 @@ interface KieApiResponse {
     taskId?: string;
     recordId?: string;
     id?: string;
-    request_id?: string;
     [key: string]: unknown;
 }
 
 /**
- * Kie.ai API input structure
+ * Input para API KIE.ai
  */
 interface KieApiInput {
     prompt: string;
     output_format: 'png' | 'jpeg' | 'webp';
     image_size: string;
-    /** 
-     * Array of image URLs for edit models
-     * @remarks Supports up to 10 images. Additional images will be ignored.
-     * @see MAX_KIE_IMAGES
-     */
     image_urls?: string[];
-    /** Internal metadata for webhook processing */
-    _metadata?: {
-        nodeId?: string;
-        projectId?: string;
-    };
 }
 
 /**
- * Extracts request ID from Kie.ai API response
- * Tries multiple possible locations in the response object
+ * Provider para KIE.ai
  */
-function extractRequestId(response: KieApiResponse): string | null {
-    return (
-        response.data?.taskId ||
-        response.data?.recordId ||
-        response.data?.id ||
-        response.taskId ||
-        response.recordId ||
-        response.id ||
-        response.request_id ||
-        null
-    );
+export class KieImageProvider extends ImageProviderBase {
+    protected get providerName(): string {
+        return 'KIE';
+    }
+
+    /**
+     * Submeter job para API KIE.ai
+     */
+    protected async submitToExternalAPI(
+        input: ImageGenerationInput
+    ): Promise<{ requestId: string; tempJobId?: string }> {
+        // Converter model ID se necessário (kie-nano-banana → google/nano-banana)
+        const apiModelId = this.convertModelId(input.modelId);
+
+        // Preparar input para API
+        const apiInput = this.prepareApiInput(input);
+
+        console.log('🔍 [KIE] API input prepared:', {
+            originalModelId: input.modelId,
+            apiModelId,
+            hasImages: !!apiInput.image_urls?.length,
+            imageCount: apiInput.image_urls?.length ?? 0,
+            imageSize: apiInput.image_size,
+        });
+
+        // Submeter para API
+        const response = await this.callKieApi(apiModelId, apiInput);
+
+        // Extrair request ID
+        const requestId = this.extractRequestId(response);
+
+        if (!requestId) {
+            console.error('❌ [KIE] No request ID in response:', response);
+            throw new Error(
+                'KIE.ai API did not return a valid request ID. ' +
+                'Expected one of: data.taskId, data.recordId, data.id, taskId, recordId, id'
+            );
+        }
+
+        console.log('✅ [KIE] Job submitted successfully:', { requestId });
+
+        return { requestId };
+    }
+
+    /**
+     * Converter model ID para formato da API KIE
+     * kie-nano-banana → google/nano-banana
+     * kie-nano-banana-edit → google/nano-banana-edit
+     */
+    private convertModelId(modelId: string): string {
+        // Se já está no formato correto, retorna
+        if (modelId.startsWith('google/')) {
+            return modelId;
+        }
+
+        // Converter kie-* para google/*
+        if (modelId.startsWith('kie-')) {
+            const modelName = modelId.replace('kie-', '');
+            return `google/${modelName}`;
+        }
+
+        // Fallback: retorna como está
+        return modelId;
+    }
+
+    /**
+     * Preparar input para API KIE.ai
+     */
+    private prepareApiInput(input: ImageGenerationInput): KieApiInput {
+        const apiInput: KieApiInput = {
+            prompt: input.prompt,
+            output_format: 'png',
+            image_size: input.size || '1:1', // KIE usa aspect ratio (1:1, 16:9, etc)
+        };
+
+        // Adicionar imagens se fornecidas
+        if (input.images && input.images.length > 0) {
+            const isEditModel = input.modelId.includes('-edit');
+
+            console.log(`🖼️ [KIE] Adding ${input.images.length} image(s) to ${isEditModel ? 'edit' : 'generation'} request`);
+
+            // Limitar a MAX_KIE_IMAGES
+            apiInput.image_urls = input.images.slice(0, MAX_KIE_IMAGES);
+
+            if (input.images.length > MAX_KIE_IMAGES) {
+                console.warn(
+                    `⚠️ [KIE] Max ${MAX_KIE_IMAGES} images supported. ${input.images.length - MAX_KIE_IMAGES} image(s) ignored.`
+                );
+            }
+        }
+
+        return apiInput;
+    }
+
+    /**
+     * Chamar API KIE.ai
+     */
+    private async callKieApi(
+        modelId: string,
+        input: KieApiInput
+    ): Promise<KieApiResponse> {
+        const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${env.KIE_API_KEY}`,
+            },
+            body: JSON.stringify({
+                model: modelId,
+                callBackUrl: this.config.webhookUrl,
+                input,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ [KIE] API error:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText,
+            });
+            throw new Error(`KIE.ai API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = (await response.json()) as KieApiResponse;
+
+        console.log('📥 [KIE] API response:', {
+            hasData: !!data.data,
+            dataKeys: data.data ? Object.keys(data.data) : [],
+            topLevelKeys: Object.keys(data),
+        });
+
+        return data;
+    }
+
+    /**
+     * Extrair request ID da resposta
+     */
+    private extractRequestId(response: KieApiResponse): string | null {
+        return (
+            response.data?.taskId ||
+            response.data?.recordId ||
+            response.data?.id ||
+            response.taskId ||
+            response.recordId ||
+            response.id ||
+            null
+        );
+    }
 }
 
+/**
+ * Factory function para criar provider KIE
+ */
+export function createKieImageProvider(webhookUrl?: string): KieImageProvider {
+    if (!env.KIE_API_KEY) {
+        throw new Error('KIE_API_KEY is not configured');
+    }
 
-
-export const kieAIServer = {
-    image: (modelId: KieModel): ImageModel => ({
-        modelId,
-        provider: 'kie',
-        specificationVersion: 'v2',
-        maxImagesPerCall: 1,
-        doGenerate: async ({
-            prompt,
-            size,
-            providerOptions,
-        }) => {
-            // KIE.ai expects aspect ratio format directly (e.g., "1:1", "16:9", "auto")
-            const imageSize = size || '1:1'; // Default to 1:1 if not provided
-
-            console.log('🔍 KIE image_size:', {
-                size: imageSize,
-                modelId,
-            });
-
-            const input: KieApiInput = {
-                prompt,
-                output_format: 'png',
-                image_size: imageSize, // Pass aspect ratio directly (e.g., "1:1", "16:9", "auto")
-            };
-
-            // Handle image input for both generation and edit models
-            const isEditModel = modelId.includes('-edit');
-            const imageUrl = typeof providerOptions?.kie?.image === 'string'
-                ? providerOptions.kie.image
-                : undefined;
-            const imageUrls = Array.isArray(providerOptions?.kie?.images)
-                ? providerOptions.kie.images.filter((url): url is string => typeof url === 'string')
-                : undefined;
-
-            // Both generation and edit models can accept images
-            // Edit models require images, generation models use them as reference
-            if (imageUrls && imageUrls.length > 0) {
-                console.log(`🖼️ Adding ${imageUrls.length} image(s) to KIE ${isEditModel ? 'edit' : 'generation'} request`);
-                input.image_urls = imageUrls.slice(0, MAX_KIE_IMAGES);
-
-                if (imageUrls.length > MAX_KIE_IMAGES) {
-                    console.warn(`⚠️ KIE.ai supports max ${MAX_KIE_IMAGES} images. ${imageUrls.length - MAX_KIE_IMAGES} image(s) ignored.`);
-                }
-            } else if (imageUrl) {
-                console.log(`🖼️ Adding single image to KIE ${isEditModel ? 'edit' : 'generation'} request`);
-                input.image_urls = [imageUrl]; // Convert to array
-            } else if (isEditModel) {
-                console.warn('⚠️ Edit model called without image input - this may fail');
-            }
-
-            console.log('🔍 Kie.ai queue request:', {
-                modelId,
-                isEditModel,
-                hasImage: !!imageUrl,
-                hasImages: !!(imageUrls && imageUrls.length > 0),
-                imageCount: imageUrls?.length ?? (imageUrl ? 1 : 0),
-                inputKeys: Object.keys(input),
-                fullInput: JSON.stringify(input, null, 2),
-            });
-
-            // Kie.ai funciona APENAS com webhooks
-            const useWebhook = !!process.env.NEXT_PUBLIC_APP_URL;
-            const webhookUrl = useWebhook
-                ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/kie`
-                : undefined;
-
-            console.log('🚀 Kie.ai submission mode:', {
-                mode: useWebhook ? 'WEBHOOK (required)' : 'ERROR - webhook required',
-                webhookUrl: webhookUrl || 'N/A',
-                hasAppUrl: !!process.env.NEXT_PUBLIC_APP_URL,
-                appUrl: process.env.NEXT_PUBLIC_APP_URL,
-            });
-
-            if (!useWebhook) {
-                throw new Error(
-                    'Kie.ai requires webhook configuration. Please set NEXT_PUBLIC_APP_URL environment variable. ' +
-                    'The Kie.ai API does not support polling for job status - it only works with webhooks.'
-                );
-            }
-
-            // Modo webhook: salvar job ANTES de submeter
-            const user = await currentUser();
-            if (!user) {
-                throw new Error('User not authenticated');
-            }
-
-            // Gerar um request_id temporário
-            const tempRequestId = `kie_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-
-            console.log('Pre-creating Kie.ai job to avoid race condition...');
-
-            // Extrair metadados do providerOptions
-            const nodeId = providerOptions?.kie?.nodeId;
-            const projectId = providerOptions?.kie?.projectId;
-
-            const jobId = await createFalJob({
-                requestId: tempRequestId,
-                userId: user.id,
-                modelId,
-                type: 'image',
-                input: {
-                    ...input,
-                    // Adicionar metadados para atualização do project
-                    _metadata: {
-                        nodeId,
-                        projectId,
-                    },
-                },
-            });
-
-            console.log('Kie.ai job pre-created with ID:', jobId);
-
-            // Submeter para a API Kie.ai
-            let submission: KieApiResponse;
-            try {
-                const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${env.KIE_API_KEY}`,
-                    },
-                    body: JSON.stringify({
-                        model: modelId,
-                        callBackUrl: webhookUrl,
-                        input,
-                    }),
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('❌ Kie.ai API error:', {
-                        status: response.status,
-                        statusText: response.statusText,
-                        body: errorText,
-                    });
-                    throw new Error(`Kie.ai API error: ${response.status} ${response.statusText}`);
-                }
-
-                submission = await response.json() as KieApiResponse;
-
-                console.log('📥 Kie.ai API response:', {
-                    fullResponse: JSON.stringify(submission, null, 2),
-                    hasData: !!submission.data,
-                    dataKeys: submission.data ? Object.keys(submission.data) : [],
-                    topLevelKeys: Object.keys(submission),
-                });
-            } catch (error) {
-                console.error('❌ Failed to submit job to Kie.ai:', error);
-                throw new Error(
-                    `Failed to submit job to Kie.ai: ${error instanceof Error ? error.message : 'Unknown error'}`
-                );
-            }
-
-            // Extract request ID using helper function
-            const request_id = extractRequestId(submission);
-
-            if (!request_id) {
-                console.error('❌ Could not find request ID in response:', submission);
-                throw new Error(
-                    'Kie.ai API did not return a valid request ID. ' +
-                    'Expected one of: data.taskId, data.recordId, data.id, taskId, recordId, id, request_id'
-                );
-            }
-
-            console.log('Kie.ai queue submitted:', { request_id, useWebhook });
-
-            // Atualizar o job com o request_id real
-            await database
-                .update(falJobs)
-                .set({ requestId: request_id })
-                .where(eq(falJobs.id, jobId));
-
-            // Retornar estrutura compatível com AI SDK
-            // IMPORTANTE: NÃO incluir 'images' para forçar modo webhook
-            return {
-                warnings: [],
-                response: {
-                    timestamp: new Date(),
-                    modelId,
-                    headers: {
-                        'x-kie-request-id': request_id,
-                        'x-kie-status': 'pending',
-                        'x-job-id': jobId, // Adicionar jobId para atualização otimista da fila
-                    },
-                },
-            } as any;
-        },
-    }),
-};
+    return new KieImageProvider({
+        apiKey: env.KIE_API_KEY,
+        webhookUrl,
+    });
+}

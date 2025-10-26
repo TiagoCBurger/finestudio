@@ -37,6 +37,24 @@ export const updateProjectAction = async (
       contentSize: data.content ? JSON.stringify(data.content).length : 0
     });
 
+    // Validate content structure if present
+    if (data.content) {
+      const content = data.content as any;
+      if (!content.nodes || !Array.isArray(content.nodes)) {
+        throw new Error('Invalid content structure: nodes must be an array');
+      }
+      if (!content.edges || !Array.isArray(content.edges)) {
+        throw new Error('Invalid content structure: edges must be an array');
+      }
+
+      // Check for circular references or invalid data
+      try {
+        JSON.stringify(data.content);
+      } catch (jsonError) {
+        throw new Error('Invalid content: cannot serialize to JSON (possible circular reference)');
+      }
+    }
+
     const result = await database
       .update(projects)
       .set({

@@ -59,7 +59,7 @@ export const ProjectProvider = ({
       fallbackData: initialData, // Use initial SSR data
       revalidateOnFocus: false, // Don't revalidate on window focus
       revalidateOnReconnect: true, // Revalidate on reconnect
-      dedupingInterval: 100, // Reduzido para 100ms para resposta mais rápida
+      dedupingInterval: 500, // Increased to 500ms to prevent rapid re-fetches during saves
       // Log when SWR revalidates
       onSuccess: (data) => {
         console.log('📊 [ProjectProvider] SWR revalidated successfully', {
@@ -71,12 +71,25 @@ export const ProjectProvider = ({
         });
       },
       onError: (err) => {
-        console.error('❌ [ProjectProvider] SWR revalidation error:', err);
+        // Silenciar erros de rede do ngrok (são esperados em dev)
+        const isNgrokError = err?.message?.includes('Load failed') ||
+          err?.message?.includes('NetworkError');
+
+        if (!isNgrokError) {
+          console.error('❌ [ProjectProvider] SWR revalidation error:', err);
+        }
       },
       // Compare function to prevent unnecessary re-renders
       compare: (a, b) => {
-        // Deep comparison of content to prevent re-renders when data hasn't actually changed
-        const isSame = JSON.stringify(a) === JSON.stringify(b);
+        // Quick reference check first
+        if (a === b) return true;
+        if (!a || !b) return false;
+
+        // Compare only relevant fields to avoid unnecessary re-renders
+        const aContent = JSON.stringify(a.content);
+        const bContent = JSON.stringify(b.content);
+        const isSame = aContent === bContent && a.updatedAt === b.updatedAt;
+
         if (!isSame) {
           console.log('🔄 [ProjectProvider] Data changed, triggering re-render', {
             projectId: initialData.id,

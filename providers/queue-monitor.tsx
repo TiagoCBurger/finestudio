@@ -6,6 +6,14 @@ import { useQueueMonitor, type FalJob } from '@/hooks/use-queue-monitor';
 interface QueueMonitorContextValue {
     addJobOptimistically: (job: FalJob) => void;
     activeCount: number;
+    jobs: FalJob[];
+    isLoading: boolean;
+    error: Error | null;
+    isConnected: boolean;
+    refresh: () => Promise<void>;
+    removeJob: (jobId: string) => void;
+    clearCompleted: () => void;
+    clearFailed: () => void;
 }
 
 const QueueMonitorContext = createContext<QueueMonitorContextValue | null>(null);
@@ -19,7 +27,15 @@ export function useQueueMonitorContext() {
             addJobOptimistically: () => {
                 console.warn('QueueMonitorContext not available, job will only appear after Realtime update');
             },
-            activeCount: 0
+            activeCount: 0,
+            jobs: [],
+            isLoading: false,
+            error: null,
+            isConnected: false,
+            refresh: async () => { },
+            removeJob: () => { },
+            clearCompleted: () => { },
+            clearFailed: () => { },
         };
     }
     return context;
@@ -32,14 +48,23 @@ interface QueueMonitorProviderProps {
 }
 
 export function QueueMonitorProvider({ userId, projectId, children }: QueueMonitorProviderProps) {
-    const { addJobOptimistically, activeCount } = useQueueMonitor({
+    const queueMonitor = useQueueMonitor({
         userId,
         projectId,
         enabled: true
     });
 
+    // [DEBUG] Log provider render
+    console.log('🔄 [QueueMonitorProvider] Rendering:', {
+        userId,
+        projectId,
+        jobCount: queueMonitor.jobs.length,
+        activeCount: queueMonitor.activeCount,
+        isConnected: queueMonitor.isConnected,
+    });
+
     return (
-        <QueueMonitorContext.Provider value={{ addJobOptimistically, activeCount }}>
+        <QueueMonitorContext.Provider value={queueMonitor}>
             {children}
         </QueueMonitorContext.Provider>
     );

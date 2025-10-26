@@ -3,6 +3,7 @@
 import { updateProjectAction } from '@/app/actions/project/update';
 import { useAnalytics } from '@/hooks/use-analytics';
 import { useSaveProject } from '@/hooks/use-save-project';
+import { useUser } from '@/hooks/use-user';
 import { handleError } from '@/lib/error/handle';
 import { isValidSourceTarget } from '@/lib/xyflow';
 import { NodeDropzoneProvider } from '@/providers/node-dropzone';
@@ -47,6 +48,7 @@ import {
 
 export const Canvas = ({ children, ...props }: ReactFlowProps) => {
   const project = useProject();
+  const { user } = useUser();
   const {
     onConnect,
     onConnectStart,
@@ -79,6 +81,12 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
   // Track previous content to prevent unnecessary comparisons
   const prevContentRef = useRef<string | null>(null);
 
+  // Track if there are pending local changes
+  const hasPendingChangesRef = useRef<boolean>(false);
+
+  // Track last save timestamp to prevent race conditions
+  const lastSaveTimestampRef = useRef<number>(0);
+
   // Sync nodes and edges when project updates via Realtime
   useEffect(() => {
     if (!content?.nodes || !content?.edges) {
@@ -93,6 +101,65 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
       return;
     }
 
+    // CRITICAL: Don't overwrite local changes if save is pending or in progress
+    // EXCEPTION: Allow updates to node state (like image generation completing)
+    const timeSinceLastSave = Date.now() - lastSaveTimestampRef.current;
+    const recentlySaved = timeSinceLastSave < 2000;
+
+    if (hasPendingChangesRef.current || saveState.isSaving || recentlySaved) {
+      // Check if this is just a node state update (not position/connection changes)
+      const currentNodesById = new Map(nodes.map(n => [n.id, n]));
+      const newNodesById = new Map(content.nodes.map(n => [n.id, n]));
+
+      let onlyStateChanges = true;
+      let hasStateChanges = false;
+
+      // Check if only node data.state changed
+      for (const [id, newNode] of newNodesById) {
+        const currentNode = currentNodesById.get(id);
+        if (!currentNode) {
+          onlyStateChanges = false;
+          break;
+        }
+
+        // Compare everything except data.state
+        const { state: newState, ...newDataRest } = (newNode.data || {}) as any;
+        const { state: currentState, ...currentDataRest } = (currentNode.data || {}) as any;
+
+        if (JSON.stringify(newDataRest) !== JSON.stringify(currentDataRest) ||
+          newNode.position.x !== currentNode.position.x ||
+          newNode.position.y !== currentNode.position.y) {
+          onlyStateChanges = false;
+          break;
+        }
+
+        if (JSON.stringify(newState) !== JSON.stringify(currentState)) {
+          hasStateChanges = true;
+        }
+      }
+
+      // If only state changed (like image generation completing), allow the update
+      if (onlyStateChanges && hasStateChanges) {
+        console.log('✅ Allowing state-only update during pending changes:', {
+          projectId: project?.id,
+          hasStateChanges,
+        });
+      } else {
+        console.log('⏸️ Skipping realtime update - local changes pending:', {
+          hasPendingChanges: hasPendingChangesRef.current,
+          isSaving: saveState.isSaving,
+          recentlySaved,
+          timeSinceLastSave,
+          onlyStateChanges,
+          hasStateChanges,
+          projectId: project?.id,
+        });
+        // Update the ref to prevent repeated checks during the pending period
+        prevContentRef.current = contentString;
+        return;
+      }
+    }
+
     // Only log when we're actually checking (content changed)
     console.log('🔄 Checking for canvas sync:', {
       projectNodeCount: content.nodes.length,
@@ -103,7 +170,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
       projectUpdatedAt: project?.updatedAt,
     });
 
-    // Compare with current state
+    // Compare with current state using refs to avoid triggering re-renders
     const currentNodesString = JSON.stringify(nodes);
     const currentEdgesString = JSON.stringify(edges);
     const contentNodesString = JSON.stringify(content.nodes);
@@ -119,7 +186,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
         projectUpdatedAt: project?.updatedAt,
       });
 
-      // FORÇA a atualização do canvas com os novos dados
+      // Update canvas with new data from realtime
       setNodes(content.nodes);
       setEdges(content.edges);
 
@@ -130,7 +197,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
       // Still update the ref to avoid repeated checks
       prevContentRef.current = contentString;
     }
-  }, [content, nodes, edges, project?.id, project?.updatedAt]);
+  }, [content, project?.id, project?.updatedAt, saveState.isSaving]);
 
   const save = useDebouncedCallback(async () => {
     if (saveState.isSaving || !project?.userId || !project?.id) {
@@ -177,13 +244,21 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
       );
 
       await saveWithRetry();
+
+      // Update timestamp and clear flags
+      lastSaveTimestampRef.current = Date.now();
       setSaveState((prev) => ({ ...prev, lastSaved: new Date() }));
+
+      // Clear pending changes flag AFTER save completes
+      hasPendingChangesRef.current = false;
     } catch (error) {
       // Extract only the error message to prevent raw data from being displayed
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       handleError('Error saving project', errorMessage);
       // Revert optimistic mutation in case of error
       mutate(`/api/projects/${project.id}`);
+      // Keep pending flag on error so realtime doesn't overwrite
+      hasPendingChangesRef.current = true;
     } finally {
       setSaveState((prev) => ({ ...prev, isSaving: false }));
     }
@@ -191,6 +266,9 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
 
   const handleNodesChange = useCallback<OnNodesChange>(
     (changes) => {
+      // Mark that we have pending changes
+      hasPendingChangesRef.current = true;
+
       setNodes((current) => {
         const updated = applyNodeChanges(changes, current);
         save();
@@ -203,6 +281,9 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
 
   const handleEdgesChange = useCallback<OnEdgesChange>(
     (changes) => {
+      // Mark that we have pending changes
+      hasPendingChangesRef.current = true;
+
       setEdges((current) => {
         const updated = applyEdgeChanges(changes, current);
         save();

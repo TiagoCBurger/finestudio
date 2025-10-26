@@ -138,6 +138,53 @@ export const VideoTransform = ({
     }
   }, [loading, data.generated?.url, previousUrl, shouldShowSuccessToast, id]);
 
+  // Polling para verificar se o vídeo foi gerado (fallback se Realtime falhar)
+  useEffect(() => {
+    if (!loading || !project?.id) {
+      return;
+    }
+
+    console.log('🔄 Starting polling for video generation:', { nodeId: id });
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/projects/${project.id}`);
+        if (!response.ok) return;
+
+        const updatedProject = await response.json();
+        const updatedNode = updatedProject.content?.nodes?.find((n: any) => n.id === id);
+
+        if (updatedNode?.data?.generated?.url) {
+          console.log('✅ Polling detected video ready:', {
+            nodeId: id,
+            url: updatedNode.data.generated.url.substring(0, 50) + '...',
+          });
+
+          updateNodeData(id, {
+            generated: updatedNode.data.generated,
+            loading: false,
+            status: 'completed',
+            updatedAt: updatedNode.data.updatedAt,
+          });
+
+          clearInterval(pollInterval);
+        }
+      } catch (error) {
+        console.error('❌ Polling error:', error);
+      }
+    }, 3000); // Poll a cada 3 segundos (vídeos demoram mais)
+
+    const timeout = setTimeout(() => {
+      console.log('⏱️ Polling timeout reached');
+      clearInterval(pollInterval);
+    }, 10 * 60 * 1000); // 10 minutos para vídeos
+
+    return () => {
+      clearInterval(pollInterval);
+      clearTimeout(timeout);
+    };
+  }, [loading, project?.id, id, updateNodeData]);
+
   const handleModelChange = useCallback(
     (value: string) => {
       const newModel = videoModels[value];
@@ -460,7 +507,11 @@ export const VideoTransform = ({
       <Textarea
         value={localInstructions}
         onChange={handleInstructionsChange}
+        onInput={handleInstructionsChange}
         onBlur={handleInstructionsBlur}
+        onKeyDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
         placeholder="Enter instructions"
         className="shrink-0 resize-none rounded-none border-none bg-transparent! shadow-none focus-visible:ring-0"
       />

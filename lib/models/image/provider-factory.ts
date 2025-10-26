@@ -1,80 +1,107 @@
 /**
- * Image Provider Factory
- * 
- * Factory function to get the appropriate image provider based on model ID.
- * This centralizes provider selection logic and makes it easy to add new providers.
+ * Factory para criar providers de geração de imagem
+ * Centraliza a criação e configuração de providers
  */
 
-import { FalImageProvider } from './fal.server.v2';
-import { KieImageProvider } from './kie.server.v2';
+import { env } from '@/lib/env';
+import { KieImageProvider } from './kie.server';
 import type { ImageProviderBase } from './provider-base';
 
 /**
- * Get image provider for a given model ID
- * 
- * @param modelId - The model ID (e.g., 'fal-nano-banana', 'kie-nano-banana')
- * @returns Image provider instance
- * @throws Error if model ID is not recognized
- * 
- * @example
- * ```typescript
- * const provider = getProviderForModel('fal-nano-banana');
- * const result = await provider.generateImage(input);
- * ```
+ * Tipos de provider suportados
  */
-export function getProviderForModel(modelId: string): ImageProviderBase {
-    // Fal.ai models start with 'fal-'
-    if (modelId.startsWith('fal-')) {
-        return new FalImageProvider();
+export type ProviderType = 'kie' | 'fal';
+
+/**
+ * Mapa de providers
+ */
+const providers = new Map<string, ImageProviderBase>();
+
+/**
+ * Obter URL do webhook baseado no ambiente
+ */
+function getWebhookUrl(providerType: ProviderType): string | undefined {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!baseUrl) {
+        return undefined;
     }
 
-    // Kie.ai models start with 'kie-'
-    if (modelId.startsWith('kie-')) {
-        return new KieImageProvider();
-    }
-
-    // Unknown provider
-    throw new Error(
-        `Unknown provider for model: ${modelId}. ` +
-        `Supported prefixes: 'fal-', 'kie-'`
-    );
+    return `${baseUrl}/api/webhooks/${providerType}`;
 }
 
 /**
- * Check if a model ID is supported
- * 
- * @param modelId - The model ID to check
- * @returns True if model is supported, false otherwise
- * 
- * @example
- * ```typescript
- * if (isModelSupported('fal-nano-banana')) {
- *   // Model is supported
- * }
- * ```
+ * Criar provider KIE
  */
-export function isModelSupported(modelId: string): boolean {
-    try {
-        getProviderForModel(modelId);
-        return true;
-    } catch {
-        return false;
+function createKieProvider(): KieImageProvider {
+    if (!env.KIE_API_KEY) {
+        throw new Error('KIE_API_KEY is not configured');
     }
+
+    const webhookUrl = getWebhookUrl('kie');
+
+    if (!webhookUrl) {
+        console.warn('⚠️ NEXT_PUBLIC_APP_URL not set, KIE provider will not work');
+    }
+
+    return new KieImageProvider({
+        apiKey: env.KIE_API_KEY,
+        webhookUrl,
+    });
 }
 
 /**
- * Get provider name for a model ID
- * 
- * @param modelId - The model ID
- * @returns Provider name (e.g., 'fal', 'kie')
- * @throws Error if model ID is not recognized
- * 
- * @example
- * ```typescript
- * const providerName = getProviderName('fal-nano-banana'); // 'fal'
- * ```
+ * Obter provider por tipo
  */
-export function getProviderName(modelId: string): string {
-    const provider = getProviderForModel(modelId);
-    return provider.providerName;
+export function getImageProvider(providerType: ProviderType): ImageProviderBase {
+    // Verificar se já existe instância em cache
+    const cached = providers.get(providerType);
+    if (cached) {
+        return cached;
+    }
+
+    // Criar nova instância
+    let provider: ImageProviderBase;
+
+    switch (providerType) {
+        case 'kie':
+            provider = createKieProvider();
+            break;
+
+        case 'fal':
+            throw new Error('Fal provider not implemented yet in v2');
+
+        default:
+            throw new Error(`Unknown provider type: ${providerType}`);
+    }
+
+    // Cachear instância
+    providers.set(providerType, provider);
+
+    return provider;
+}
+
+/**
+ * Obter provider por model ID
+ */
+export function getProviderByModelId(modelId: string): ImageProviderBase {
+    // Determinar provider baseado no model ID
+
+    // KIE models: google/* ou kie-*
+    if (modelId.startsWith('google/') || modelId.startsWith('kie-')) {
+        return getImageProvider('kie');
+    }
+
+    // FAL models: fal-* ou fal-ai/*
+    if (modelId.startsWith('fal-') || modelId.startsWith('fal-ai/')) {
+        return getImageProvider('fal');
+    }
+
+    throw new Error(`Cannot determine provider for model: ${modelId}`);
+}
+
+/**
+ * Limpar cache de providers (útil para testes)
+ */
+export function clearProviderCache(): void {
+    providers.clear();
 }

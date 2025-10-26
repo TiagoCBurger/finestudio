@@ -1,11 +1,10 @@
 /**
- * Image Node State Components
- * 
- * Exports all state-specific components for image nodes.
+ * Componentes de estado para nó de imagem
+ * Cada estado tem seu próprio componente visual
  */
 
-export { IdlePlaceholder } from './idle-placeholder';
-export { GeneratingSkeleton } from './generating-skeleton';
+export { IdleState } from './idle-state';
+export { GeneratingState } from './generating-state';
 export { LoadingImage } from './loading-image';
-export { ReadyImage } from './ready-image';
+export { ReadyState } from './ready-state';
 export { ErrorDisplay } from './error-display';

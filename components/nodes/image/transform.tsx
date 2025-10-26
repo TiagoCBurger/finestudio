@@ -1,733 +1,474 @@
-import { generateImageAction } from '@/app/actions/image/create';
-import { editImageAction } from '@/app/actions/image/edit';
+/**
+ * Componente de Transformação de Imagem (Refatorado)
+ * Usa máquina de estados explícita e lógica simplificada
+ */
+
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useReactFlow, getIncomers } from '@xyflow/react';
+import { toast } from 'sonner';
+import { mutate } from 'swr';
+import {
+    PlayIcon,
+    RotateCcwIcon,
+    DownloadIcon,
+    ClockIcon,
+    Loader2Icon,
+} from 'lucide-react';
+
 import { NodeLayout } from '@/components/nodes/layout';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
+import { ModelSelector } from '../model-selector';
+import { ImageSizeSelector } from './image-size-selector';
+
+import { useProject } from '@/providers/project';
+import { useQueueMonitorContext } from '@/providers/queue-monitor';
 import { useAnalytics } from '@/hooks/use-analytics';
+
 import { download } from '@/lib/download';
 import { handleError } from '@/lib/error/handle';
 import { imageModels, getEnabledImageModels } from '@/lib/models/image';
 import { getImagesFromImageNodes, getTextFromTextNodes } from '@/lib/xyflow';
-import { useProject } from '@/providers/project';
-import { useQueueMonitorContext } from '@/providers/queue-monitor';
-import { getIncomers, useReactFlow } from '@xyflow/react';
-import {
-  ClockIcon,
-  DownloadIcon,
-  Loader2Icon,
-  PlayIcon,
-  RotateCcwIcon,
-} from 'lucide-react';
-import Image from 'next/image';
-import {
-  type ChangeEventHandler,
-  type ComponentProps,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
-import { toast } from 'sonner';
-import { mutate } from 'swr';
-import type { ImageNodeProps } from '.';
-import { ModelSelector } from '../model-selector';
-import { ImageSizeSelector } from './image-size-selector';
 
-type ImageTransformProps = ImageNodeProps & {
-  title: string;
+import type { ImageNodeProps } from '.';
+import type { ImageNodeState } from '@/lib/models/image/types';
+
+// Importar states
+import {
+    IdleState,
+    GeneratingState,
+    LoadingImage,
+    ReadyState,
+    ErrorDisplay,
+} from './states';
+
+type ImageTransformV2Props = ImageNodeProps & {
+    title: string;
 };
 
 const getDefaultModel = (models: typeof imageModels) => {
-  const defaultModel = Object.entries(models).find(
-    ([_, model]) => model.default
-  );
-
-  if (!defaultModel) {
-    throw new Error('No default model found');
-  }
-
-  return defaultModel[0];
+    const defaultModel = Object.entries(models).find(([_, model]) => model.default);
+    if (!defaultModel) {
+        throw new Error('No default model found');
+    }
+    return defaultModel[0];
 };
 
-export const ImageTransform = ({
-  data,
-  id,
-  type,
-  title,
-}: ImageTransformProps) => {
-  const { updateNodeData, getNodes, getEdges } = useReactFlow();
-  const [loading, setLoading] = useState(false);
-  const [imageLoading, setImageLoading] = useState(false);
-  const [previousUrl, setPreviousUrl] = useState(data.generated?.url || '');
-  const [shouldShowSuccessToast, setShouldShowSuccessToast] = useState(false);
-  const [localInstructions, setLocalInstructions] = useState(
-    data.instructions ?? ''
-  );
-  const [lastErrorUrl, setLastErrorUrl] = useState<string | null>(null);
+export const ImageTransformV2 = ({ data, id, type, title }: ImageTransformV2Props) => {
+    const { updateNodeData, getNodes, getEdges } = useReactFlow();
+    const project = useProject();
+    const { addJobOptimistically } = useQueueMonitorContext();
+    const analytics = useAnalytics();
 
-  const project = useProject();
-  const { addJobOptimistically } = useQueueMonitorContext();
+    // Estado local apenas para UI (não para lógica de negócio)
+    const [localInstructions, setLocalInstructions] = useState(data.instructions ?? '');
+    const [showSuccessToast, setShowSuccessToast] = useState(false);
+    const [isGenerating, setIsGenerating] = useState(false);
 
-  // Detectar quando webhook completou via Realtime
-  useEffect(() => {
-    const currentUrl = data.generated?.url || '';
-    const hasLoadingFlag = (data as any).loading === true;
-    const nodeStatus = (data as any).status;
-    const requestId = (data as any).requestId;
+    // Estado vem do data do nó (fonte única de verdade)
+    const state: ImageNodeState = (data as any).state ?? { status: 'idle' };
 
-    console.log('🔍 [ImageNode] State check:', {
-      nodeId: id,
-      hasLoadingFlag,
-      nodeStatus,
-      requestId,
-      currentUrl: currentUrl ? currentUrl.substring(0, 50) + '...' : 'empty',
-      previousUrl: previousUrl ? previousUrl.substring(0, 50) + '...' : 'empty',
-      loading,
-      imageLoading,
-      updatedAt: data.updatedAt
-    });
+    // Calcular aspect ratio
+    const aspectRatio = useMemo(() => {
+        if (!data.size || typeof data.size !== 'string') {
+            return '1/1';
+        }
+        const parts = data.size.split('x');
+        if (parts.length !== 2) {
+            return '1/1';
+        }
+        const [width, height] = parts.map(Number);
+        return `${width}/${height}`;
+    }, [data.size]);
 
-    // Se o data tem flag loading=true ou status=generating, ativar loading state
-    // Isso persiste entre reloads porque está salvo no content do projeto
-    if ((hasLoadingFlag || nodeStatus === 'generating') && !loading) {
-      console.log('🔄 [ImageNode] Ativando loading state (status persistido no nó)', {
-        nodeId: id,
-        hasLoadingFlag,
-        nodeStatus,
-        requestId
-      });
-      setLoading(true);
-      setShouldShowSuccessToast(false); // Reset toast flag quando entrar em loading
-      return;
-    }
+    // Detectar quando webhook completou
+    useEffect(() => {
+        if (state.status === 'ready' && showSuccessToast) {
+            toast.success('Image generated successfully');
+            setShowSuccessToast(false);
+        }
+    }, [state.status, showSuccessToast]);
 
-    // Se temos uma URL nova e ainda estamos em loading, significa que o webhook completou
-    if (loading && currentUrl && currentUrl.length > 0 && currentUrl !== previousUrl) {
-      console.log('✅ [ImageNode] Webhook completou, URL recebida:', {
-        nodeId: id,
-        url: currentUrl.substring(0, 50) + '...',
-        previousUrl: previousUrl ? previousUrl.substring(0, 50) + '...' : 'empty',
-        updatedAt: data.updatedAt
-      });
-      setImageLoading(true);
-      setPreviousUrl(currentUrl);
-      setShouldShowSuccessToast(true);
-      // O loading será removido quando a imagem carregar (onLoad do Image)
-    }
-
-    // Se não está em loading mas tem status generating, algo está errado
-    // Mas só ativar loading se não tivermos uma URL válida ainda
-    if (!loading && nodeStatus === 'generating' && (!currentUrl || currentUrl.length === 0)) {
-      console.warn('⚠️ [ImageNode] Nó com status generating mas não está em loading!', {
-        nodeId: id,
-        nodeStatus,
-        loading,
-        currentUrl: currentUrl ? currentUrl.substring(0, 50) + '...' : 'empty'
-      });
-      setLoading(true);
-      setShouldShowSuccessToast(false); // Reset toast flag
-    }
-
-    // Se temos URL válida mas ainda tem flags de loading, limpar flags
-    // Isso pode acontecer se o webhook completou mas as flags não foram limpas
-    if (currentUrl && currentUrl.length > 0 && !loading && !imageLoading && (hasLoadingFlag || nodeStatus === 'generating')) {
-      console.log('🧹 [ImageNode] Limpando flags de loading obsoletas', {
-        nodeId: id,
-        hasLoadingFlag,
-        nodeStatus,
-        currentUrl: currentUrl.substring(0, 50) + '...'
-      });
-      // Atualizar o nó para remover flags obsoletas
-      updateNodeData(id, {
-        loading: false,
-        status: undefined,
-        requestId: undefined
-      });
-    }
-  }, [loading, data.generated?.url, id, data.updatedAt, (data as any).loading, (data as any).status, (data as any).requestId, previousUrl, imageLoading, updateNodeData]);
-
-  // Nota: Removido useFalJob e polling - agora usamos APENAS Supabase Realtime
-  // O webhook atualiza o projeto no banco e o Realtime notifica automaticamente via use-project-realtime hook
-  // Quando o projeto é atualizado, o componente re-renderiza com os novos dados automaticamente
-  const hasIncomingImageNodes =
-    getImagesFromImageNodes(getIncomers({ id }, getNodes(), getEdges()))
-      .length > 0;
-  const modelId = data.model ?? getDefaultModel(imageModels);
-  const analytics = useAnalytics();
-  const selectedModel = imageModels[modelId];
-  const size = data.size ?? selectedModel?.sizes?.at(0);
-
-  const handleGenerate = useCallback(async () => {
-    if (loading || !project?.id) {
-      return;
-    }
-
-    let incomers: any[] = [];
-    try {
-      incomers = getIncomers({ id }, getNodes(), getEdges());
-    } catch (incomersError) {
-      console.error('❌ Error getting incomers:', incomersError);
-      incomers = [];
-    }
-
-    // Garantir que incomers é um array
-    // Garantir que incomers é sempre um array
-    if (!incomers || !Array.isArray(incomers)) {
-      console.warn('⚠️ getIncomers did not return an array:', incomers);
-      incomers = [];
-    }
-
-    // Debug logging para identificar problemas
-    console.log('🔍 Debug incomers:', {
-      incomersCount: incomers.length,
-      incomers: incomers.map(node => ({
-        id: node?.id || 'unknown',
-        type: node?.type || 'unknown',
-        hasData: !!node?.data,
-        dataKeys: node?.data ? Object.keys(node.data) : []
-      }))
-    });
-
-    let textNodes: string[] = [];
-    let imageNodes: any[] = [];
-    try {
-      textNodes = getTextFromTextNodes(incomers);
-      imageNodes = getImagesFromImageNodes(incomers);
-    } catch (nodesError) {
-      console.error('❌ Error processing nodes:', nodesError);
-      textNodes = [];
-      imageNodes = [];
-    }
-
-    try {
-      if (!textNodes.length && !imageNodes.length) {
-        throw new Error('No input provided');
-      }
-
-      setLoading(true);
-
-      // Aviso para múltiplas imagens
-      if (imageNodes.length > 1) {
-        toast.info(
-          `Using ${imageNodes.length} images. The first image will be used as base.`
-        );
-      }
-
-      analytics.track('canvas', 'node', 'generate', {
-        type,
-        textPromptsLength: textNodes.length,
-        imagePromptsLength: imageNodes.length,
-        model: modelId,
-        instructionsLength: data.instructions?.length ?? 0,
-      });
-
-      const response = imageNodes.length
-        ? await editImageAction({
-          images: imageNodes,
-          instructions: data.instructions,
-          nodeId: id,
-          projectId: project.id,
-          modelId,
-          size,
-        })
-        : await generateImageAction({
-          prompt: textNodes.join('\n'),
-          modelId,
-          instructions: data.instructions,
-          projectId: project.id,
-          nodeId: id,
-          size,
-        });
-
-      console.log('Server Action response:', response);
-
-      if ('error' in response) {
-        throw new Error(response.error);
-      }
-
-      // Verificar se há request_id nos headers (modo webhook)
-      const nodeData = response.nodeData as any;
-      const falRequestId = nodeData.generated?.headers?.['x-fal-request-id'];
-      const falStatus = nodeData.generated?.headers?.['x-fal-status'];
-      const kieRequestId = nodeData.generated?.headers?.['x-kie-request-id'];
-      const kieStatus = nodeData.generated?.headers?.['x-kie-status'];
-      const jobId = nodeData.generated?.headers?.['x-job-id'];
-
-      const isWebhookMode = (falRequestId && falStatus === 'pending') || (kieRequestId && kieStatus === 'pending');
-
-      if (isWebhookMode) {
-        // ✅ Modo webhook: NÃO atualizar nó localmente
-        // O banco de dados já foi atualizado pela action com status 'generating'
-        // O Realtime vai notificar automaticamente e o useEffect vai ativar o loading
-        console.log('🔄 Modo webhook ativado, request_id:', falRequestId || kieRequestId);
-        console.log('⏳ Aguardando webhook completar...');
-
-        // ➕ Adicionar job otimisticamente na fila
-        // Isso faz o job aparecer imediatamente no QueueMonitor
-        if (jobId) {
-          console.log('➕ Adicionando job otimisticamente na fila:', jobId);
-          addJobOptimistically({
-            id: jobId,
-            requestId: falRequestId || kieRequestId || '',
-            userId: project.userId,
-            modelId,
-            type: 'image',
-            status: 'pending',
-            input: {
-              prompt: textNodes.join('\n'),
-              _metadata: {
-                nodeId: id,
-                projectId: project.id
-              }
-            },
-            result: null,
-            error: null,
-            createdAt: new Date().toISOString(),
-            completedAt: null
-          });
+    // Polling para verificar se a imagem foi gerada (fallback se Realtime falhar)
+    useEffect(() => {
+        if (state.status !== 'generating' || !project?.id) {
+            return;
         }
 
-        // NÃO chamar updateNodeData aqui - deixar o Realtime fazer o trabalho
-      } else {
-        // ✅ Modo síncrono (sem webhook) - atualizar imediatamente
-        console.log('✅ Modo síncrono, atualizando imediatamente');
-        updateNodeData(id, response.nodeData);
-        setShouldShowSuccessToast(true);
-        setLoading(false);
-      }
-
-      setTimeout(() => mutate('credits'), 5000);
-    } catch (error) {
-      const timestamp = new Date().toISOString();
-      console.error(`❌ [${timestamp}] Error in handleGenerate:`, error);
-      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-      console.error('Error type:', typeof error);
-      console.error('Error message:', error instanceof Error ? error.message : String(error));
-
-      // Se o erro for sobre .map(), adicionar contexto extra
-      if (error instanceof Error && error.message.includes('map')) {
-        console.error('🔍 MAP ERROR DETECTED - This should not happen anymore!');
-        console.error('Current state:', {
-          loading,
-          hasProject: !!project?.id,
-          modelId,
-          size,
+        console.log('🔄 Starting polling for image generation:', {
+            nodeId: id,
+            requestId: 'requestId' in state ? state.requestId : undefined,
         });
-      }
 
-      // 🔧 Tratamento inteligente de erros
-      const errorMessage = error instanceof Error ? error.message : String(error);
+        const pollInterval = setInterval(async () => {
+            try {
+                // Buscar projeto atualizado
+                const response = await fetch(`/api/projects/${project.id}`);
+                if (!response.ok) return;
 
-      // Lista de padrões que indicam erros reais (não falsos positivos)
-      const realErrorPatterns = [
-        'No input provided',
-        'Model not found',
-        'requires at least one image',
-        'API key',
-        'authentication',
-        'credits',
-        'quota',
-        'network',
-        'fetch failed',
-        'timeout'
-      ];
+                const updatedProject = await response.json();
+                const updatedNode = updatedProject.content?.nodes?.find((n: any) => n.id === id);
 
-      // Lista de padrões que indicam falsos positivos (ignorar)
-      const falsePositivePatterns = [
-        'Node not found',
-        'Target node',
-        'not found in project',
-        'Invalid project content',
-        'Project not found',
-        'may have been deleted',
-        'loading state',
-        'webhook',
-        'pending'
-      ];
+                if (updatedNode?.data?.state?.status === 'ready') {
+                    console.log('✅ Polling detected image ready:', {
+                        nodeId: id,
+                        url: updatedNode.data.state.url,
+                    });
 
-      const isRealError = realErrorPatterns.some(pattern =>
-        errorMessage.toLowerCase().includes(pattern.toLowerCase())
-      );
+                    // Atualizar nó com novo estado
+                    updateNodeData(id, {
+                        state: updatedNode.data.state,
+                        updatedAt: updatedNode.data.updatedAt,
+                    });
 
-      const isFalsePositive = falsePositivePatterns.some(pattern =>
-        errorMessage.toLowerCase().includes(pattern.toLowerCase())
-      );
-
-      // Se for claramente um falso positivo, ignorar completamente
-      if (isFalsePositive) {
-        console.warn('⚠️ Erro ignorado (falso positivo confirmado):', {
-          error: errorMessage,
-          nodeId: id,
-          projectId: project?.id,
-          reason: 'Padrão de falso positivo detectado'
-        });
-        // NÃO parar loading se estamos em modo webhook
-        // O webhook pode ainda completar com sucesso
-        return;
-      }
-
-      // Se for um erro real, mostrar ao usuário
-      if (isRealError) {
-        console.error('❌ Erro real na geração:', errorMessage);
-        handleError('Error generating image', error);
-        setLoading(false);
-      } else {
-        // ⚠️ Erro desconhecido - logar mas não mostrar toast
-        // Pode ser um erro temporário ou de rede
-        console.warn('⚠️ Erro desconhecido (não mostrando toast):', {
-          error: errorMessage,
-          nodeId: id,
-          projectId: project?.id,
-          reason: 'Não corresponde a padrões conhecidos'
-        });
-        // NÃO parar loading - pode ser temporário
-        // Se realmente falhar, o webhook vai notificar
-      }
-    }
-    // NÃO usar finally para não parar loading no modo webhook
-  }, [
-    loading,
-    project?.id,
-    size,
-    id,
-    analytics,
-    type,
-    data.instructions,
-    getEdges,
-    modelId,
-    getNodes,
-    updateNodeData,
-  ]);
-
-  const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> =
-    useCallback(
-      (event) => {
-        setLocalInstructions(event.target.value);
-      },
-      []
-    );
-
-  const handleInstructionsBlur = useCallback(() => {
-    if (localInstructions !== data.instructions) {
-      updateNodeData(id, { instructions: localInstructions });
-    }
-  }, [localInstructions, data.instructions, id]);
-
-  // Sync local state with external changes
-  useEffect(() => {
-    if (data.instructions !== undefined && data.instructions !== localInstructions) {
-      setLocalInstructions(data.instructions);
-    }
-  }, [data.instructions]);
-
-  const handleModelChange = useCallback(
-    (value: string) => {
-      updateNodeData(id, { model: value });
-    },
-    [id]
-  );
-
-  const handleSizeChange = useCallback(
-    (value: string) => {
-      updateNodeData(id, { size: value });
-    },
-    [id]
-  );
-
-  const toolbar = useMemo<ComponentProps<typeof NodeLayout>['toolbar']>(() => {
-    let enabledModels;
-    try {
-      enabledModels = getEnabledImageModels();
-    } catch (error) {
-      console.error('Error getting enabled image models:', error);
-      enabledModels = {};
-    }
-
-    // Garantir que enabledModels é um objeto válido antes de usar Object.entries
-    if (!enabledModels || typeof enabledModels !== 'object') {
-      console.error('getEnabledImageModels returned invalid data:', enabledModels);
-      return [];
-    }
-
-    let availableModels;
-    try {
-      const entries = Object.entries(enabledModels);
-      if (!Array.isArray(entries)) {
-        console.error('Object.entries did not return array:', entries);
-        return [];
-      }
-
-      availableModels = Object.fromEntries(
-        entries.map(([key, model]) => [
-          key,
-          {
-            ...model,
-            disabled: hasIncomingImageNodes
-              ? !model.supportsEdit
-              : model.disabled,
-          },
-        ])
-      );
-    } catch (error) {
-      console.error('Error processing available models:', error);
-      return [];
-    }
-
-    const items: ComponentProps<typeof NodeLayout>['toolbar'] = [
-      {
-        children: (
-          <ModelSelector
-            value={modelId}
-            options={availableModels}
-            id={id}
-            className="w-[200px] rounded-full"
-            onChange={handleModelChange}
-          />
-        ),
-      },
-    ];
-
-    if (selectedModel?.sizes?.length) {
-      items.push({
-        children: (
-          <ImageSizeSelector
-            value={size ?? ''}
-            options={selectedModel?.sizes ?? []}
-            id={id}
-            className="w-[200px] rounded-full"
-            onChange={handleSizeChange}
-          />
-        ),
-      });
-    }
-
-    items.push(
-      loading
-        ? {
-          tooltip: 'Generating...',
-          children: (
-            <Button size="icon" className="rounded-full" disabled>
-              <Loader2Icon className="animate-spin" size={12} />
-            </Button>
-          ),
-        }
-        : {
-          tooltip: data.generated?.url ? 'Regenerate' : 'Generate',
-          children: (
-            <Button
-              size="icon"
-              className="rounded-full"
-              onClick={handleGenerate}
-              disabled={loading || !project?.id}
-            >
-              {data.generated?.url ? (
-                <RotateCcwIcon size={12} />
-              ) : (
-                <PlayIcon size={12} />
-              )}
-            </Button>
-          ),
-        }
-    );
-
-    if (data.generated) {
-      items.push({
-        tooltip: 'Download',
-        children: (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full"
-            onClick={() => download(data.generated, id, 'png')}
-          >
-            <DownloadIcon size={12} />
-          </Button>
-        ),
-      });
-    }
-
-    if (data.updatedAt) {
-      items.push({
-        tooltip: `Last updated: ${new Intl.DateTimeFormat('en-US', {
-          dateStyle: 'short',
-          timeStyle: 'short',
-        }).format(new Date(data.updatedAt))}`,
-        children: (
-          <Button size="icon" variant="ghost" className="rounded-full">
-            <ClockIcon size={12} />
-          </Button>
-        ),
-      });
-    }
-
-    return items;
-  }, [
-    modelId,
-    hasIncomingImageNodes,
-    id,
-    handleModelChange,
-    handleSizeChange,
-    selectedModel?.sizes,
-    size,
-    loading,
-    data.generated,
-    data.updatedAt,
-    handleGenerate,
-    project?.id,
-  ]);
-
-  const aspectRatio = useMemo(() => {
-    if (!data.size || typeof data.size !== 'string') {
-      return '1/1';
-    }
-
-    const parts = data.size.split('x');
-    if (parts.length !== 2) {
-      return '1/1';
-    }
-
-    const [width, height] = parts.map(Number);
-    return `${width}/${height}`;
-  }, [data.size]);
-
-  // Verificar se temos uma URL válida (não vazia)
-  const hasValidUrl = data.generated?.url && data.generated.url.length > 0;
-
-  // Verificar se está aguardando webhook (para evitar tentar carregar imagem prematuramente)
-  const isAwaitingWebhook = (data as any).loading === true ||
-    (data as any).status === 'generating' ||
-    !!(data as any).requestId;
-
-  return (
-    <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>
-      {(loading || imageLoading || isAwaitingWebhook) && (
-        <Skeleton
-          className="flex w-full animate-pulse items-center justify-center rounded-b-xl"
-          style={{ aspectRatio }}
-        >
-          <div className="flex flex-col items-center gap-2">
-            <Loader2Icon
-              size={16}
-              className="size-4 animate-spin text-muted-foreground"
-            />
-            <p className="text-xs text-muted-foreground">
-              {imageLoading ? 'Loading image...' : 'Generating...'}
-            </p>
-          </div>
-        </Skeleton>
-      )}
-      {!loading && !imageLoading && !isAwaitingWebhook && !hasValidUrl && (
-        <div
-          className="flex w-full items-center justify-center rounded-b-xl bg-secondary p-4"
-          style={{ aspectRatio }}
-        >
-          <p className="text-muted-foreground text-sm">
-            Press <PlayIcon size={12} className="-translate-y-px inline" /> to
-            create an image
-          </p>
-        </div>
-      )}
-      {!loading && !imageLoading && !isAwaitingWebhook && hasValidUrl && data.generated && (
-        <Image
-          key={`${data.generated.url}-${data.updatedAt || ''}`} // Force re-render when URL or timestamp changes
-          src={data.generated.url}
-          alt="Generated image"
-          width={1000}
-          height={1000}
-          className="w-full rounded-b-xl object-cover"
-          onLoad={() => {
-            console.log('✅ Image loaded successfully:', data.generated?.url);
-            setImageLoading(false);
-            setLoading(false);
-            setLastErrorUrl(null); // Reset error tracking on successful load
-
-            // Só mostrar toast se foi uma nova geração, não um reload da página
-            if (shouldShowSuccessToast) {
-              toast.success('Image generated successfully');
-              setShouldShowSuccessToast(false);
+                    clearInterval(pollInterval);
+                }
+            } catch (error) {
+                console.error('❌ Polling error:', error);
             }
-          }}
-          onError={(error) => {
-            const currentUrl = data.generated?.url || '';
+        }, 2000); // Poll a cada 2 segundos
 
-            console.error('❌ Failed to load image:', {
-              url: currentUrl,
-              error: error,
-              timestamp: data.updatedAt,
-              isLoading: loading,
-              isImageLoading: imageLoading,
-              lastErrorUrl,
-              nodeStatus: (data as any).status,
-              hasLoadingFlag: (data as any).loading
+        // Limpar após 5 minutos (timeout)
+        const timeout = setTimeout(() => {
+            console.log('⏱️ Polling timeout reached');
+            clearInterval(pollInterval);
+        }, 5 * 60 * 1000);
+
+        return () => {
+            clearInterval(pollInterval);
+            clearTimeout(timeout);
+        };
+    }, [state.status, project?.id, id, updateNodeData]);
+
+    // Sync local instructions com data (apenas quando data.instructions muda externamente)
+    useEffect(() => {
+        if (data.instructions !== undefined && data.instructions !== localInstructions) {
+            setLocalInstructions(data.instructions);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data.instructions]);
+
+    // Handlers
+    const handleGenerate = useCallback(async () => {
+        // Prevenir duplo clique
+        if (state.status === 'generating' || !project?.id || isGenerating) {
+            console.log('⏸️ Generation already in progress, ignoring click');
+            return;
+        }
+
+        setIsGenerating(true);
+
+        try {
+            const incomers = getIncomers({ id }, getNodes(), getEdges());
+            const textNodes = getTextFromTextNodes(incomers);
+            const imageNodes = getImagesFromImageNodes(incomers);
+
+            // Permitir geração se houver texto dos nós conectados, imagens conectadas, ou instruções no próprio nó
+            if (!textNodes.length && !imageNodes.length && !data.instructions?.trim()) {
+                throw new Error('No input provided. Add text nodes, images, or enter instructions.');
+            }
+
+            analytics.track('canvas', 'node', 'generate', {
+                type,
+                textPromptsLength: textNodes.length,
+                imagePromptsLength: imageNodes.length,
+                model: data.model ?? getDefaultModel(imageModels),
+                instructionsLength: data.instructions?.length ?? 0,
             });
 
-            // 🔧 CORREÇÃO: Evitar toasts duplicados para a mesma URL
-            if (lastErrorUrl === currentUrl) {
-              console.warn('⚠️ Suprimindo toast duplicado para a mesma URL');
-              return;
+            // Importar action dinamicamente
+            const { generateImageActionV2 } = await import('@/app/actions/image/create');
+
+            const response = await generateImageActionV2({
+                prompt: textNodes.join('\n'),
+                images: imageNodes.map(img => img.url),
+                modelId: data.model ?? getDefaultModel(imageModels),
+                instructions: data.instructions,
+                projectId: project.id,
+                nodeId: id,
+                size: data.size,
+            });
+
+            if ('error' in response) {
+                throw new Error(response.error);
             }
 
-            // 🔧 CORREÇÃO: Não mostrar erro se estamos em processo de geração
-            // A URL antiga pode falhar enquanto aguardamos a nova
-            if (loading || imageLoading) {
-              console.warn('⚠️ Suprimindo erro durante processo de geração/carregamento');
-              return;
+            // Atualizar nó com novo estado
+            updateNodeData(id, response.nodeData);
+
+            // Adicionar job na fila otimisticamente
+            if (response.state.status === 'generating') {
+                const jobData = {
+                    id: response.state.jobId,
+                    requestId: response.state.requestId,
+                    userId: project.userId,
+                    modelId: response.state.modelId,
+                    type: 'image' as const,
+                    status: 'pending' as const,
+                    input: {
+                        prompt: textNodes.join('\n'),
+                        _metadata: {
+                            nodeId: id,
+                            projectId: project.id,
+                        },
+                    },
+                    result: null,
+                    error: null,
+                    createdAt: new Date().toISOString(),
+                    completedAt: null,
+                };
+
+                console.log('➕ [ImageTransformV2] BEFORE addJobOptimistically:', {
+                    jobId: jobData.id,
+                    requestId: jobData.requestId,
+                    modelId: jobData.modelId,
+                    timestamp: new Date().toISOString(),
+                });
+
+                addJobOptimistically(jobData);
+
+                console.log('➕ [ImageTransformV2] AFTER addJobOptimistically:', {
+                    jobId: jobData.id,
+                    timestamp: new Date().toISOString(),
+                });
+
+                // Preparar para mostrar toast quando completar
+                setShowSuccessToast(true);
             }
 
-            // 🔧 CORREÇÃO: Não mostrar erro se o nó está em estado de geração
-            // Isso indica que estamos aguardando o webhook
-            const nodeStatus = (data as any).status;
-            const hasLoadingFlag = (data as any).loading;
-            if (nodeStatus === 'generating' || hasLoadingFlag === true) {
-              console.warn('⚠️ Suprimindo erro - nó em estado de geração (aguardando webhook)');
-              return;
-            }
+            // Atualizar créditos
+            setTimeout(() => mutate('credits'), 5000);
+        } catch (error) {
+            console.error('❌ Error generating image:', error);
+            handleError('Error generating image', error);
 
-            // 🔧 CORREÇÃO: Não mostrar erro se a URL mudou recentemente
-            // Isso indica que estamos em transição entre URLs
-            if (currentUrl !== previousUrl) {
-              console.warn('⚠️ Suprimindo erro durante transição de URL');
-              setPreviousUrl(currentUrl);
-              return;
-            }
+            // Atualizar nó com estado de erro
+            updateNodeData(id, {
+                state: {
+                    status: 'error',
+                    error: {
+                        type: 'api',
+                        message: error instanceof Error ? error.message : 'Unknown error',
+                        canRetry: true,
+                    },
+                },
+            });
+        } finally {
+            // Sempre limpar a flag, mesmo em caso de erro
+            setIsGenerating(false);
+        }
+    }, [
+        state.status,
+        project?.id,
+        isGenerating,
+        id,
+        data.model,
+        data.instructions,
+        data.size,
+        type,
+        analytics,
+        getNodes,
+        getEdges,
+        updateNodeData,
+        addJobOptimistically,
+    ]);
 
-            // 🔧 CORREÇÃO: Não mostrar erro se URL está vazia (aguardando webhook)
-            if (!currentUrl || currentUrl.length === 0) {
-              console.warn('⚠️ Suprimindo erro para URL vazia (aguardando webhook)');
-              return;
-            }
+    const handleInstructionsChange = useCallback(
+        (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+            setLocalInstructions(event.target.value);
+        },
+        []
+    );
 
-            // Marcar que já mostramos erro para esta URL
-            setLastErrorUrl(currentUrl);
+    const handleInstructionsBlur = useCallback(() => {
+        if (localInstructions !== data.instructions) {
+            updateNodeData(id, { instructions: localInstructions });
+        }
+    }, [localInstructions, data.instructions, id, updateNodeData]);
 
-            // Check if this is a Cloudflare R2 signed URL that might be expired
-            const isR2SignedUrl = currentUrl.includes('r2.cloudflarestorage.com') && currentUrl.includes('X-Amz-Signature');
+    const handleModelChange = useCallback(
+        (value: string) => {
+            updateNodeData(id, { model: value });
+        },
+        [id, updateNodeData]
+    );
 
-            if (isR2SignedUrl) {
-              console.warn('⚠️ R2 signed URL detected - might be expired');
-              toast.error('Image URL expired - please regenerate or switch to Supabase storage');
-            } else {
-              toast.error('Failed to load image - please try regenerating');
-            }
+    const handleSizeChange = useCallback(
+        (value: string) => {
+            updateNodeData(id, { size: value });
+        },
+        [id, updateNodeData]
+    );
 
-            setImageLoading(false);
-            setLoading(false);
-          }}
-          // Add loading state to prevent flash of broken image
-          onLoadStart={() => {
-            console.log('🔄 Starting to load image:', data.generated?.url);
-            setImageLoading(true);
-          }}
-        />
-      )}
-      <Textarea
-        value={localInstructions}
-        onChange={handleInstructionsChange}
-        onBlur={handleInstructionsBlur}
-        placeholder="Enter instructions"
-        className="shrink-0 resize-none rounded-none border-none bg-transparent! shadow-none focus-visible:ring-0"
-      />
-    </NodeLayout>
-  );
+    // Toolbar
+    const hasIncomingImageNodes =
+        getImagesFromImageNodes(getIncomers({ id }, getNodes(), getEdges())).length > 0;
+    const modelId = data.model ?? getDefaultModel(imageModels);
+    const selectedModel = imageModels[modelId];
+    const size = data.size ?? selectedModel?.sizes?.at(0);
+
+    const toolbar = useMemo<ComponentProps<typeof NodeLayout>['toolbar']>(() => {
+        const enabledModels = getEnabledImageModels();
+        const availableModels = Object.fromEntries(
+            Object.entries(enabledModels).map(([key, model]) => [
+                key,
+                {
+                    ...model,
+                    disabled: hasIncomingImageNodes ? !model.supportsEdit : model.disabled,
+                },
+            ])
+        );
+
+        const items: ComponentProps<typeof NodeLayout>['toolbar'] = [
+            {
+                children: (
+                    <ModelSelector
+                        value={modelId}
+                        options={availableModels}
+                        id={id}
+                        className="w-[200px] rounded-full"
+                        onChange={handleModelChange}
+                    />
+                ),
+            },
+        ];
+
+        if (selectedModel?.sizes?.length) {
+            items.push({
+                children: (
+                    <ImageSizeSelector
+                        value={size ?? ''}
+                        options={selectedModel?.sizes ?? []}
+                        id={id}
+                        className="w-[200px] rounded-full"
+                        onChange={handleSizeChange}
+                    />
+                ),
+            });
+        }
+
+        items.push(
+            state.status === 'generating' || isGenerating
+                ? {
+                    tooltip: 'Generating...',
+                    children: (
+                        <Button size="icon" className="rounded-full" disabled>
+                            <Loader2Icon className="animate-spin" size={12} />
+                        </Button>
+                    ),
+                }
+                : {
+                    tooltip: state.status === 'ready' ? 'Regenerate' : 'Generate',
+                    children: (
+                        <Button
+                            size="icon"
+                            className="rounded-full"
+                            onClick={handleGenerate}
+                            disabled={!project?.id || isGenerating}
+                        >
+                            {state.status === 'ready' ? (
+                                <RotateCcwIcon size={12} />
+                            ) : (
+                                <PlayIcon size={12} />
+                            )}
+                        </Button>
+                    ),
+                }
+        );
+
+        if (state.status === 'ready') {
+            items.push({
+                tooltip: 'Download',
+                children: (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full"
+                        onClick={() =>
+                            download({ url: state.url, type: 'image/png' }, id, 'png')
+                        }
+                    >
+                        <DownloadIcon size={12} />
+                    </Button>
+                ),
+            });
+        }
+
+        if (data.updatedAt) {
+            items.push({
+                tooltip: `Last updated: ${new Intl.DateTimeFormat('en-US', {
+                    dateStyle: 'short',
+                    timeStyle: 'short',
+                }).format(new Date(data.updatedAt))}`,
+                children: (
+                    <Button size="icon" variant="ghost" className="rounded-full">
+                        <ClockIcon size={12} />
+                    </Button>
+                ),
+            });
+        }
+
+        return items;
+    }, [
+        modelId,
+        hasIncomingImageNodes,
+        id,
+        handleModelChange,
+        handleSizeChange,
+        selectedModel?.sizes,
+        size,
+        state,
+        isGenerating,
+        data.updatedAt,
+        handleGenerate,
+        project?.id,
+    ]);
+
+    // Renderizar estado apropriado
+    const renderState = () => {
+        switch (state.status) {
+            case 'idle':
+                return <IdleState aspectRatio={aspectRatio} />;
+
+            case 'generating':
+                return (
+                    <GeneratingState aspectRatio={aspectRatio} requestId={state.requestId} />
+                );
+
+            case 'loading_image':
+                return <LoadingImage aspectRatio={aspectRatio} />;
+
+            case 'ready':
+                return <ReadyState url={state.url} timestamp={state.timestamp} />;
+
+            case 'error':
+                return (
+                    <ErrorDisplay
+                        aspectRatio={aspectRatio}
+                        error={state.error}
+                        onRetry={state.error?.canRetry ? handleGenerate : undefined}
+                    />
+                );
+
+            default:
+                return <IdleState aspectRatio={aspectRatio} />;
+        }
+    };
+
+    return (
+        <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>
+            {renderState()}
+            <Textarea
+                value={localInstructions}
+                onChange={handleInstructionsChange}
+                onInput={handleInstructionsChange}
+                onBlur={handleInstructionsBlur}
+                onKeyDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                placeholder="Enter instructions"
+                className="shrink-0 resize-none rounded-none border-none bg-transparent! shadow-none focus-visible:ring-0"
+            />
+        </NodeLayout>
+    );
 };

@@ -1,172 +1,120 @@
 /**
- * Image Generation Types
- * 
- * Defines the state machine and types for image generation workflow.
- * This provides a clear, type-safe way to track image generation status.
+ * Tipos compartilhados para geração de imagens
+ * Define estados, erros e estruturas de dados comuns
  */
 
 /**
- * Image node state machine
- * 
- * States:
- * - idle: No image generated yet, waiting for user action
- * - generating: Job submitted to external API, waiting for webhook
- * - loading_image: Image URL received, loading from storage
- * - ready: Image loaded and displayed successfully
- * - error: Generation or loading failed
+ * Estados possíveis de um nó de imagem
  */
 export type ImageNodeState =
     | { status: 'idle' }
-    | {
-        status: 'generating';
-        requestId: string;
-        jobId: string;
-        modelId: string;
-        startedAt: string;
-    }
-    | {
-        status: 'loading_image';
-        url: string;
-        requestId?: string;
-        jobId?: string;
-    }
-    | {
-        status: 'ready';
-        url: string;
-        type: string;
-        generatedAt: string;
-    }
-    | {
-        status: 'error';
-        error: string;
-        errorType: ImageGenerationErrorType;
-        canRetry: boolean;
-        failedAt: string;
-    };
+    | { status: 'generating'; requestId: string; jobId: string; modelId: string }
+    | { status: 'loading_image'; url: string }
+    | { status: 'ready'; url: string; timestamp: string }
+    | { status: 'error'; error: ImageGenerationError };
 
 /**
- * Error types for image generation
- * 
- * - validation: Input validation failed (e.g., missing prompt)
- * - api: External API error (e.g., Fal.ai, Kie.ai)
- * - network: Network connectivity issue
- * - storage: Storage upload/download failed
- * - node_deleted: Node was deleted after job started (silent error)
- * - project_deleted: Project was deleted after job started (silent error)
- * - timeout: Operation timed out
- * - unknown: Unexpected error
+ * Tipos de erro na geração de imagem
  */
-export type ImageGenerationErrorType =
-    | 'validation'
-    | 'api'
-    | 'network'
-    | 'storage'
-    | 'node_deleted'
-    | 'project_deleted'
-    | 'timeout'
-    | 'unknown';
+export type ImageGenerationError =
+    | { type: 'validation'; message: string; canRetry: false }
+    | { type: 'api'; message: string; canRetry: true; statusCode?: number }
+    | { type: 'network'; message: string; canRetry: true }
+    | { type: 'timeout'; message: string; canRetry: true }
+    | { type: 'node_deleted'; message: string; canRetry: false; silent: true }
+    | { type: 'project_deleted'; message: string; canRetry: false; silent: true }
+    | { type: 'webhook'; message: string; canRetry: false };
 
 /**
- * Structured error for image generation
- */
-export interface ImageGenerationError {
-    type: ImageGenerationErrorType;
-    message: string;
-    canRetry: boolean;
-    silent: boolean; // If true, don't show toast to user
-    originalError?: unknown;
-}
-
-/**
- * Result from image generation action
- */
-export type ImageGenerationResult =
-    | {
-        success: true;
-        state: ImageNodeState;
-    }
-    | {
-        success: false;
-        error: ImageGenerationError;
-    };
-
-/**
- * Job submission result from provider
+ * Resultado da submissão de um job
  */
 export interface JobSubmissionResult {
     requestId: string;
     jobId: string;
-    status: 'pending' | 'completed';
-    url?: string; // Only present if completed synchronously
-    headers?: Record<string, string>;
+    webhookUrl?: string;
+    mode: 'webhook' | 'polling';
 }
 
 /**
- * Input for image generation
+ * Input para geração de imagem
  */
 export interface ImageGenerationInput {
     prompt: string;
     modelId: string;
-    instructions?: string;
     size?: string;
-    nodeId: string;
-    projectId: string;
-    images?: string[]; // For image-to-image models
-}
-
-/**
- * Helper to create error objects
- */
-export function createImageError(
-    type: ImageGenerationErrorType,
-    message: string,
-    originalError?: unknown
-): ImageGenerationError {
-    // Determine if error should be silent (not shown to user)
-    const silent = type === 'node_deleted' || type === 'project_deleted';
-
-    // Determine if error is retryable
-    const canRetry = type === 'api' || type === 'network' || type === 'timeout';
-
-    return {
-        type,
-        message,
-        canRetry,
-        silent,
-        originalError,
+    images?: string[]; // Para edit mode
+    strength?: number; // Para edit mode
+    metadata: {
+        nodeId: string;
+        projectId: string;
+        userId: string;
     };
 }
 
 /**
- * Helper to check if state is loading
+ * Resultado da geração de imagem
  */
-export function isLoadingState(state: ImageNodeState): boolean {
-    return state.status === 'generating' || state.status === 'loading_image';
+export interface ImageGenerationResult {
+    state: ImageNodeState;
+    nodeData: {
+        state: ImageNodeState;
+        updatedAt: string;
+    };
 }
 
 /**
- * Helper to check if state has image
+ * Payload do webhook (normalizado)
  */
-export function hasImage(state: ImageNodeState): boolean {
-    return (
-        state.status === 'ready' ||
-        state.status === 'loading_image'
-    );
+export interface WebhookPayload {
+    requestId: string;
+    status: 'pending' | 'completed' | 'failed';
+    result?: {
+        images?: Array<{ url: string }>;
+        [key: string]: unknown;
+    };
+    error?: string;
 }
 
 /**
- * Helper to get image URL from state
+ * Job no banco de dados
  */
-export function getImageUrl(state: ImageNodeState): string | null {
-    if (state.status === 'ready' || state.status === 'loading_image') {
-        return state.url;
-    }
-    return null;
+export interface FalJob {
+    id: string;
+    requestId: string;
+    userId: string;
+    modelId: string;
+    type: 'image' | 'video';
+    status: 'pending' | 'completed' | 'failed';
+    input: {
+        prompt?: string;
+        _metadata?: {
+            nodeId: string;
+            projectId: string;
+        };
+        [key: string]: unknown;
+    } | null;
+    result: {
+        images?: Array<{ url: string }>;
+        [key: string]: unknown;
+    } | null;
+    error: string | null;
+    createdAt: string;
+    completedAt: string | null;
 }
 
 /**
- * Helper to check if error should be shown to user
+ * Configuração do provider
  */
-export function shouldShowError(error: ImageGenerationError): boolean {
-    return !error.silent;
+export interface ProviderConfig {
+    apiKey: string;
+    webhookUrl?: string;
+    timeout?: number;
+}
+
+/**
+ * Metadados do job para atualização do projeto
+ */
+export interface JobMetadata {
+    nodeId: string;
+    projectId: string;
 }

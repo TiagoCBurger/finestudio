@@ -103,7 +103,7 @@ export const TextPrimitive = ({
       // Only update if messages changed
       const currentMessages = JSON.stringify(data.messages || []);
       const newMessages = JSON.stringify(simpleMessages);
-      
+
       if (currentMessages !== newMessages) {
         updateNodeData(id, {
           messages: simpleMessages,
@@ -122,7 +122,7 @@ export const TextPrimitive = ({
 
     const messageText = newMessage.trim();
     setNewMessage('');
-    
+
     try {
       // Send to AI - useChat will handle adding messages
       await sendMessage(
@@ -196,16 +196,14 @@ export const TextPrimitive = ({
             {messages.map((msg, index) => (
               <div
                 key={index}
-                className={`flex ${
-                  msg.role === 'user' ? 'justify-end' : 'justify-start'
-                }`}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'
+                  }`}
               >
                 <div
-                  className={`px-4 py-2 rounded-lg max-w-[80%] ${
-                    msg.role === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-foreground'
-                  }`}
+                  className={`px-4 py-2 rounded-lg max-w-[80%] ${msg.role === 'user'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground'
+                    }`}
                 >
                   <div className="text-sm whitespace-pre-wrap">
                     {msg.parts.find((part) => part.type === 'text')?.text || ''}
@@ -220,18 +218,22 @@ export const TextPrimitive = ({
           <Input
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
+            onInput={(e) => setNewMessage(e.currentTarget.value)}
             onKeyDown={(e) => {
+              e.stopPropagation();
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSendMessage();
               }
             }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
             placeholder="Type a message..."
             className="flex-grow"
             disabled={status === 'submitted' || status === 'streaming' || !project?.id}
           />
-          <Button 
-            onClick={handleSendMessage} 
+          <Button
+            onClick={handleSendMessage}
             size="icon"
             disabled={status === 'submitted' || status === 'streaming' || !newMessage.trim() || !project?.id}
           >

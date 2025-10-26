@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Queue Realtime</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <h1>Test Queue Realtime Subscription</h1>
+    <div id="status">Initializing...</div>
+    <div id="logs" style="margin-top: 20px; font-family: monospace; white-space: pre-wrap;"></div>
+
+    <script>
+        // Load environment variables from .env file
+        async function loadEnv() {
+            try {
+                const response = await fetch('/.env');
+                const text = await response.text();
+                const env = {};
+                text.split('\n').forEach(line => {
+                    const [key, ...valueParts] = line.split('=');
+                    if (key && valueParts.length > 0) {
+                        env[key.trim()] = valueParts.join('=').trim().replace(/^["']|["']$/g, '');
+                    }
+                });
+                return env;
+            } catch (error) {
+                console.error('Failed to load .env:', error);
+                return {};
+            }
+        }
+
+        function log(message, data = null) {
+            const timestamp = new Date().toISOString();
+            const logDiv = document.getElementById('logs');
+            const logMessage = `[${timestamp}] ${message}${data ? '\n' + JSON.stringify(data, null, 2) : ''}`;
+            console.log(logMessage);
+            logDiv.textContent += logMessage + '\n\n';
+        }
+
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+            log('STATUS: ' + message);
+        }
+
+        async function testQueueRealtime() {
+            updateStatus('Loading environment...');
+            
+            // You need to manually set these values from your .env file
+            const SUPABASE_URL = prompt('Enter NEXT_PUBLIC_SUPABASE_URL:');
+            const SUPABASE_ANON_KEY = prompt('Enter NEXT_PUBLIC_SUPABASE_ANON_KEY:');
+            const USER_ID = prompt('Enter your user ID (from auth.users):');
+
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !USER_ID) {
+                updateStatus('Missing required environment variables');
+                return;
+            }
+
+            log('Initializing Supabase client', {
+                url: SUPABASE_URL,
+                userId: USER_ID
+            });
+
+            // Create Supabase client
+            const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                realtime: {
+                    params: {
+                        log_level: 'info'
+                    }
+                }
+            });
+
+            updateStatus('Authenticating...');
+
+            // You need to sign in first
+            const email = prompt('Enter your email:');
+            const password = prompt('Enter your password:');
+
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email,
+                password
+            });
+
+            if (authError) {
+                updateStatus('Authentication failed: ' + authError.message);
+                log('Auth error', authError);
+                return;
+            }
+
+            log('Authenticated successfully', {
+                userId: authData.user.id,
+                email: authData.user.email
+            });
+
+            updateStatus('Setting up Realtime subscription...');
+
+            const topic = `fal_jobs:${authData.user.id}`;
+            log('Subscribing to topic: ' + topic);
+
+            // Create channel
+            const channel = supabase.channel(topic, {
+                config: {
+                    broadcast: { self: false, ack: true },
+                    private: true
+                }
+            });
+
+            // Set auth before subscribing
+            await supabase.realtime.setAuth(authData.session.access_token);
+            log('Auth token set for Realtime');
+
+            // Subscribe to INSERT events
+            channel
+                .on('broadcast', { event: 'INSERT' }, (payload) => {
+                    log('🎉 INSERT event received!', payload);
+                    updateStatus('Received INSERT event - check logs');
+                })
+                .on('broadcast', { event: 'UPDATE' }, (payload) => {
+                    log('🔄 UPDATE event received!', payload);
+                    updateStatus('Received UPDATE event - check logs');
+                })
+                .on('broadcast', { event: 'DELETE' }, (payload) => {
+                    log('🗑️ DELETE event received!', payload);
+                    updateStatus('Received DELETE event - check logs');
+                })
+                .subscribe((status, err) => {
+                    log('Subscription status changed', { status, error: err });
+                    
+                    if (status === 'SUBSCRIBED') {
+                        updateStatus('✅ Connected and listening for events on: ' + topic);
+                    } else if (status === 'CHANNEL_ERROR') {
+                        updateStatus('❌ Channel error: ' + (err?.message || 'Unknown error'));
+                    } else if (status === 'TIMED_OUT') {
+                        updateStatus('⏱️ Connection timed out');
+                    } else if (status === 'CLOSED') {
+                        updateStatus('🔌 Connection closed');
+                    } else {
+                        updateStatus('Status: ' + status);
+                    }
+                });
+
+            log('Subscription setup complete. Now create a new image generation to test!');
+        }
+
+        // Start test
+        testQueueRealtime().catch(error => {
+            updateStatus('Error: ' + error.message);
+            log('Fatal error', error);
+        });
+    </script>
+</body>
+</html>

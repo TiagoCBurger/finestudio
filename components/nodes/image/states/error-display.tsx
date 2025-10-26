@@ -9,15 +9,17 @@ import { Button } from '@/components/ui/button';
 import { AlertCircleIcon, RotateCcwIcon } from 'lucide-react';
 
 interface ErrorDisplayProps {
-    error: string;
-    canRetry: boolean;
+    error: {
+        type: string;
+        message: string;
+        canRetry: boolean;
+    };
     aspectRatio?: string;
     onRetry?: () => void;
 }
 
 export function ErrorDisplay({
     error,
-    canRetry,
     aspectRatio = '1/1',
     onRetry,
 }: ErrorDisplayProps) {
@@ -31,9 +33,9 @@ export function ErrorDisplay({
                 <p className="text-sm font-medium text-destructive">
                     Generation Failed
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">{error}</p>
+                <p className="text-xs text-muted-foreground mt-1">{error.message}</p>
             </div>
-            {canRetry && onRetry && (
+            {error.canRetry && onRetry && (
                 <Button
                     size="sm"
                     variant="outline"

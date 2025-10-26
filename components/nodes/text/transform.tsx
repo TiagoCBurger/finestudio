@@ -100,7 +100,7 @@ export const TextTransform = ({
       console.log('Transform - onFinish called');
       console.log('Transform - Message:', message);
       console.log('Transform - Message parts:', message.parts);
-      
+
       const textContent = message.parts.find((part) => part.type === 'text')?.text ?? '';
       const sources = message.parts?.filter((part) => part.type === 'source-url') ?? [];
 
@@ -376,7 +376,7 @@ export const TextTransform = ({
     console.log('Transform - Messages count:', messages.length);
     console.log('Transform - Non-user messages count:', nonUserMessages.length);
     console.log('Transform - Generated text:', data.generated?.text);
-    
+
     // During streaming, show messages from the chat
     if (status === 'streaming' && nonUserMessages.length) {
       const text = nonUserMessages
@@ -404,6 +404,10 @@ export const TextTransform = ({
       <Textarea
         value={outputText}
         onChange={handleOutputChange}
+        onInput={handleOutputChange}
+        onKeyDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
         placeholder={getPlaceholder()}
         readOnly={status === 'submitted' || status === 'streaming'}
         className="nowheel h-full min-h-[20rem] flex-1 resize-none rounded-t-3xl rounded-b-none border-none bg-secondary p-4 shadow-none focus-visible:ring-0"
@@ -411,6 +415,10 @@ export const TextTransform = ({
       <Textarea
         value={data.instructions ?? ''}
         onChange={handleInstructionsChange}
+        onInput={handleInstructionsChange}
+        onKeyDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
         placeholder="Enter instructions"
         className="shrink-0 resize-none rounded-none border-none bg-transparent shadow-none focus-visible:ring-0"
       />

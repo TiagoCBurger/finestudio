@@ -1,22 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import {
-    REALTIME_SUBSCRIBE_STATES,
-    REALTIME_CHANNEL_STATES,
-    type RealtimeChannel,
-    type SupabaseClient
-} from '@supabase/supabase-js';
+import { useEffect, useState, useCallback } from 'react';
+import { useRealtimeSubscription } from '@/hooks/use-realtime-subscription';
 import { realtimeLogger } from '@/lib/realtime-logger';
 import { toast } from 'sonner';
-
-/**
- * Configuration constants for subscription management
- */
-const DEBOUNCE_DELAY = 500; // ms - Delay before attempting subscription
-const MAX_RETRIES = 3; // Maximum number of retry attempts
-const RETRY_DELAYS = [1000, 2000, 4000]; // ms - Exponential backoff delays
 
 /**
  * Job status type
@@ -53,6 +40,7 @@ export interface FalJob {
 
 /**
  * Broadcast payload structure for job updates
+ * Note: Supabase Realtime may wrap the payload in a { payload: {...} } structure
  */
 interface JobUpdatePayload {
     type: 'INSERT' | 'UPDATE' | 'DELETE';
@@ -60,6 +48,14 @@ interface JobUpdatePayload {
     schema: string;
     new?: FalJob;
     old?: FalJob;
+}
+
+/**
+ * Wrapped payload from Supabase Realtime
+ */
+interface RealtimePayloadWrapper {
+    payload?: JobUpdatePayload;
+    [key: string]: any;
 }
 
 /**
@@ -79,6 +75,7 @@ interface UseQueueMonitorReturn {
     activeCount: number;
     isLoading: boolean;
     error: Error | null;
+    isConnected: boolean;
     refresh: () => Promise<void>;
     addJobOptimistically: (job: FalJob) => void;
     removeJob: (jobId: string) => void;
@@ -87,27 +84,19 @@ interface UseQueueMonitorReturn {
 }
 
 /**
- * Subscription state tracking
- */
-interface SubscriptionState {
-    isSubscribing: boolean;
-    isSubscribed: boolean;
-    retryCount: number;
-    lastAttemptTimestamp: number | null;
-}
-
-/**
  * Hook to monitor fal.ai job queue with real-time updates
  * 
  * Features:
  * - Fetches jobs from API on mount
- * - Subscribes to Supabase Realtime for live updates
+ * - Subscribes to Supabase Realtime for live updates using RealtimeConnectionManager
  * - Calculates active job count (pending jobs)
  * - Provides functions to manage job list
  * - Shows toast notifications on job completion/failure
  * 
  * Uses broadcast for better scalability (recommended over postgres_changes)
  * Follows Supabase Realtime best practices with proper error handling and cleanup
+ * 
+ * Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.1
  */
 export function useQueueMonitor({
     userId,
@@ -118,15 +107,15 @@ export function useQueueMonitor({
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
 
-    const channelRef = useRef<RealtimeChannel | null>(null);
-    const supabaseRef = useRef<SupabaseClient | null>(null);
-    const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const subscriptionStateRef = useRef<SubscriptionState>({
-        isSubscribing: false,
-        isSubscribed: false,
-        retryCount: 0,
-        lastAttemptTimestamp: null
-    });
+    // [DEBUG] Log when jobs state changes
+    useEffect(() => {
+        console.log('📊 [useQueueMonitor] Jobs state changed:', {
+            jobCount: jobs.length,
+            jobIds: jobs.map(j => j.id),
+            statuses: jobs.map(j => ({ id: j.id, status: j.status })),
+            timestamp: new Date().toISOString(),
+        });
+    }, [jobs]);
 
     // Calculate active count (pending jobs)
     const activeCount = jobs.filter(job => job.status === 'pending').length;
@@ -172,46 +161,202 @@ export function useQueueMonitor({
         }
     }, [userId, projectId, enabled]);
 
+    // Polling como fallback para atualizar a fila
+    useEffect(() => {
+        if (!enabled || !userId) return;
+
+        // Verificar se há jobs pendentes
+        const hasPendingJobs = jobs.some(job => job.status === 'pending');
+
+        if (!hasPendingJobs) return;
+
+        console.log('🔄 Starting queue polling - pending jobs detected');
+
+        const pollInterval = setInterval(async () => {
+            try {
+                const url = new URL('/api/fal-jobs', window.location.origin);
+                if (projectId) {
+                    url.searchParams.set('projectId', projectId);
+                }
+
+                const response = await fetch(url.toString());
+                if (!response.ok) return;
+
+                const data = await response.json();
+                const newJobs = data.jobs || [];
+
+                // Verificar se algum job mudou de status
+                const hasChanges = newJobs.some((newJob: FalJob) => {
+                    const oldJob = jobs.find(j => j.id === newJob.id);
+                    return oldJob && oldJob.status !== newJob.status;
+                });
+
+                if (hasChanges) {
+                    console.log('✅ Polling detected job status changes');
+                    setJobs(newJobs);
+                }
+            } catch (error) {
+                console.error('❌ Queue polling error:', error);
+            }
+        }, 3000); // Poll a cada 3 segundos
+
+        return () => clearInterval(pollInterval);
+    }, [enabled, userId, projectId, jobs]);
+
     // Handle job updates from realtime
-    const handleJobUpdate = useCallback((payload: JobUpdatePayload) => {
-        if (!payload || typeof payload !== 'object') {
-            realtimeLogger.warn('Invalid payload received, ignoring', { userId, payload: typeof payload });
+    const handleJobUpdate = useCallback((payload: any) => {
+        const timestamp = new Date().toISOString();
+
+        // [FIX] O payload do Supabase Realtime vem com estrutura diferente
+        // Pode vir como: { payload: { type, new, old } } ou diretamente { type, new, old }
+        const actualPayload = payload?.payload || payload;
+
+        // [DIAGNOSTIC] Log broadcast received with full details
+        console.log('🔔 [REALTIME-DIAGNOSTIC] QueueMonitor broadcast received:', {
+            timestamp,
+            userId,
+            rawPayload: payload,
+            actualPayload,
+            payloadKeys: Object.keys(payload || {}),
+            actualPayloadKeys: Object.keys(actualPayload || {}),
+        });
+
+        if (!actualPayload || typeof actualPayload !== 'object') {
+            console.warn('[REALTIME-DIAGNOSTIC] Invalid payload received, ignoring', {
+                userId,
+                payloadType: typeof actualPayload,
+                timestamp,
+                rawPayload: payload,
+            });
+            realtimeLogger.warn('Invalid payload received, ignoring', { userId, payload: typeof actualPayload });
             return;
         }
 
-        const { type, new: newJob, old: oldJob } = payload;
+        // Extract operation type - can be "type" or "operation" depending on payload structure
+        const type = actualPayload.type || actualPayload.operation;
+        const newJob = actualPayload.new || actualPayload.record;
+        const oldJob = actualPayload.old || actualPayload.old_record;
+        const jobId = newJob?.id || oldJob?.id;
 
-        console.log('🔔 [QueueMonitor] Job update received:', {
-            userId,
+        console.log('🔔 [REALTIME-DIAGNOSTIC] Extracted data:', {
             type,
-            jobId: newJob?.id || oldJob?.id,
+            jobId,
             oldStatus: oldJob?.status,
             newStatus: newJob?.status,
-            timestamp: new Date().toISOString()
+            hasNew: !!newJob,
+            hasOld: !!oldJob,
+            payloadKeys: Object.keys(actualPayload),
         });
+
+        if (!type) {
+            console.warn('[REALTIME-DIAGNOSTIC] No type/operation in payload, ignoring', {
+                userId,
+                actualPayload,
+                timestamp
+            });
+            return;
+        }
 
         realtimeLogger.info('Job update received', {
             userId,
             type,
-            jobId: newJob?.id || oldJob?.id
+            jobId
         });
 
         setJobs(prevJobs => {
+            // [DIAGNOSTIC] Log current jobs state before update
+            console.log('[REALTIME-DIAGNOSTIC] Jobs state BEFORE update:', {
+                timestamp,
+                userId,
+                jobId,
+                type,
+                count: prevJobs.length,
+                jobIds: prevJobs.map(j => j.id),
+                statuses: prevJobs.map(j => ({ id: j.id, status: j.status })),
+            });
+
+            let updatedJobs = prevJobs;
+            let wasAdded = false;
+            let wasRemoved = false;
+            let wasUpdated = false;
+            let isDuplicate = false;
+
             switch (type) {
                 case 'INSERT':
-                    if (!newJob) return prevJobs;
-                    // Add new job if not already in list
-                    if (prevJobs.some(j => j.id === newJob.id)) {
+                    if (!newJob) {
+                        console.warn('[REALTIME-DIAGNOSTIC] INSERT event without newJob', { timestamp, userId });
                         return prevJobs;
                     }
-                    return [newJob, ...prevJobs];
+
+                    // [DEDUPLICATION] Check if job already exists by jobId
+                    const existingById = prevJobs.find(j => j.id === newJob.id);
+                    if (existingById) {
+                        isDuplicate = true;
+                        console.log('[DEDUPLICATION] Job already exists, updating instead of inserting:', {
+                            timestamp,
+                            userId,
+                            jobId: newJob.id,
+                            requestId: newJob.requestId,
+                            existingStatus: existingById.status,
+                            newStatus: newJob.status,
+                            source: 'broadcast_insert',
+                        });
+
+                        // Update existing job with broadcast data (may have more complete info)
+                        wasUpdated = true;
+                        updatedJobs = prevJobs.map(job =>
+                            job.id === newJob.id ? { ...job, ...newJob } : job
+                        );
+                        break;
+                    }
+
+                    // [DEDUPLICATION] Also check by requestId as fallback
+                    const existingByRequestId = prevJobs.find(j => j.requestId === newJob.requestId);
+                    if (existingByRequestId) {
+                        isDuplicate = true;
+                        console.log('[DEDUPLICATION] Job with same requestId exists, updating instead of inserting:', {
+                            timestamp,
+                            userId,
+                            jobId: newJob.id,
+                            existingJobId: existingByRequestId.id,
+                            requestId: newJob.requestId,
+                            source: 'broadcast_insert',
+                        });
+
+                        // Update existing job with broadcast data
+                        wasUpdated = true;
+                        updatedJobs = prevJobs.map(job =>
+                            job.requestId === newJob.requestId ? { ...job, ...newJob, id: newJob.id } : job
+                        );
+                        break;
+                    }
+
+                    console.log('[DEDUPLICATION] No duplicate found, adding job from broadcast:', {
+                        jobId: newJob.id,
+                        requestId: newJob.requestId,
+                    });
+
+                    wasAdded = true;
+                    updatedJobs = [newJob, ...prevJobs];
+                    break;
 
                 case 'UPDATE':
-                    if (!newJob) return prevJobs;
+                    if (!newJob) {
+                        console.warn('[REALTIME-DIAGNOSTIC] UPDATE event without newJob', { timestamp, userId });
+                        return prevJobs;
+                    }
 
                     // Show toast notification on status change
                     const existingJob = prevJobs.find(j => j.id === newJob.id);
                     if (existingJob && existingJob.status !== newJob.status) {
+                        console.log('[REALTIME-DIAGNOSTIC] Job status changed:', {
+                            timestamp,
+                            userId,
+                            jobId: newJob.id,
+                            oldStatus: existingJob.status,
+                            newStatus: newJob.status,
+                        });
+
                         if (newJob.status === 'completed') {
                             // ✅ Sucesso - NÃO mostrar toast aqui
                             // O componente já mostra toast quando a imagem carrega
@@ -247,9 +392,26 @@ export function useQueueMonitor({
                                     reason: 'Nó foi removido após job criado'
                                 });
                                 // Não exibir toast, apenas logar
-                                return prevJobs.map(job =>
+                                wasUpdated = true;
+                                updatedJobs = prevJobs.map(job =>
                                     job.id === newJob.id ? newJob : job
                                 );
+
+                                // [DIAGNOSTIC] Log updated jobs state after update
+                                console.log('[REALTIME-DIAGNOSTIC] Jobs state AFTER update (false positive):', {
+                                    timestamp,
+                                    userId,
+                                    jobId,
+                                    type,
+                                    count: updatedJobs.length,
+                                    jobIds: updatedJobs.map(j => j.id),
+                                    wasAdded,
+                                    wasRemoved,
+                                    wasUpdated,
+                                    isDuplicate,
+                                });
+
+                                return updatedJobs;
                             }
 
                             // ❌ Erro real - mostrar ao usuário
@@ -260,38 +422,117 @@ export function useQueueMonitor({
                     }
 
                     // Update job in list
-                    return prevJobs.map(job =>
+                    wasUpdated = true;
+                    updatedJobs = prevJobs.map(job =>
                         job.id === newJob.id ? newJob : job
                     );
+                    break;
 
                 case 'DELETE':
-                    if (!oldJob) return prevJobs;
-                    // Remove job from list
-                    return prevJobs.filter(job => job.id !== oldJob.id);
+                    if (!oldJob) {
+                        console.warn('[REALTIME-DIAGNOSTIC] DELETE event without oldJob', { timestamp, userId });
+                        return prevJobs;
+                    }
+
+                    wasRemoved = true;
+                    updatedJobs = prevJobs.filter(job => job.id !== oldJob.id);
+                    break;
 
                 default:
+                    console.warn('[REALTIME-DIAGNOSTIC] Unknown event type:', { timestamp, userId, type });
                     return prevJobs;
             }
+
+            // [DIAGNOSTIC] Log updated jobs state after update
+            console.log('[REALTIME-DIAGNOSTIC] Jobs state AFTER update:', {
+                timestamp,
+                userId,
+                jobId,
+                type,
+                count: updatedJobs.length,
+                jobIds: updatedJobs.map(j => j.id),
+                wasAdded,
+                wasRemoved,
+                wasUpdated,
+                isDuplicate,
+                countChange: updatedJobs.length - prevJobs.length,
+            });
+
+            return updatedJobs;
         });
     }, [userId]);
 
     // Add job optimistically (before Realtime update)
     const addJobOptimistically = useCallback((job: FalJob) => {
-        console.log('➕ [QueueMonitor] Adding job optimistically:', {
+        const timestamp = new Date().toISOString();
+        console.log('➕➕➕ [QueueMonitor] addJobOptimistically CALLED:', {
             jobId: job.id,
             requestId: job.requestId,
             status: job.status,
-            type: job.type
+            type: job.type,
+            userId: job.userId,
+            currentJobCount: jobs.length,
+            timestamp,
+        });
+
+        console.trace('➕ [QueueMonitor] Call stack for addJobOptimistically');
+
+        console.log('➕ [QueueMonitor] About to call setJobs with job:', {
+            jobId: job.id,
+            timestamp,
         });
 
         setJobs(prevJobs => {
-            // Check if job already exists
-            if (prevJobs.some(j => j.id === job.id)) {
-                console.warn('⚠️ [QueueMonitor] Job already exists, skipping:', job.id);
+            console.log('➕ [QueueMonitor] Inside setJobs callback:', {
+                timestamp,
+                prevJobsCount: prevJobs.length,
+                prevJobIds: prevJobs.map(j => j.id),
+                newJobId: job.id,
+                newJobRequestId: job.requestId,
+            });
+
+            // [DEDUPLICATION] Check if job already exists by jobId
+            const existingJob = prevJobs.find(j => j.id === job.id);
+            if (existingJob) {
+                console.log('[DEDUPLICATION] Job already exists (optimistic or broadcast), skipping:', {
+                    jobId: job.id,
+                    existingStatus: existingJob.status,
+                    newStatus: job.status,
+                    source: 'optimistic_add',
+                });
                 return prevJobs;
             }
+
+            // [DEDUPLICATION] Also check by requestId as fallback
+            // This handles edge case where jobId might differ but requestId is same
+            const existingByRequestId = prevJobs.find(j => j.requestId === job.requestId);
+            if (existingByRequestId) {
+                console.log('[DEDUPLICATION] Job with same requestId exists, skipping:', {
+                    jobId: job.id,
+                    existingJobId: existingByRequestId.id,
+                    requestId: job.requestId,
+                    source: 'optimistic_add',
+                });
+                return prevJobs;
+            }
+
+            console.log('✅ [QueueMonitor] Adding new job optimistically:', {
+                jobId: job.id,
+                requestId: job.requestId,
+                previousCount: prevJobs.length,
+                newCount: prevJobs.length + 1,
+            });
+
             // Add new job at the beginning
-            return [job, ...prevJobs];
+            const newJobs = [job, ...prevJobs];
+
+            console.log('✅ [QueueMonitor] Job added to state:', {
+                jobId: job.id,
+                totalJobs: newJobs.length,
+                jobIds: newJobs.map(j => j.id),
+            });
+
+            return newJobs;
         });
     }, []);
 
@@ -321,366 +562,66 @@ export function useQueueMonitor({
         fetchJobs();
     }, [fetchJobs]);
 
-    // Subscribe to realtime updates with debouncing and retry logic
+    // Subscribe to ALL events (INSERT, UPDATE, DELETE) using a single subscription
+    // The database trigger sends INSERT, UPDATE, DELETE as separate events
+    // RealtimeConnectionManager reuses the same channel for all subscriptions to the same topic
+    // Following Supabase best practices: private channels for database triggers, no self-broadcast
+    console.log('🔌 [QueueMonitor] Setting up subscription:', {
+        topic: `fal_jobs:${userId}`,
+        enabled: enabled && !!userId,
+        userId,
+    });
+
+    const subscription = useRealtimeSubscription<any>({
+        topic: `fal_jobs:${userId}`,
+        event: '*',  // Listen to all events (INSERT, UPDATE, DELETE)
+        onMessage: handleJobUpdate,
+        enabled: enabled && !!userId,
+        private: true,  // Required for RLS authorization
+        self: false,    // Don't receive own broadcasts
+        ack: true       // Request acknowledgment
+    });
+
+    // Use connection state from single subscription
+    const isConnected = subscription.isConnected;
+
+    // [DIAGNOSTIC] Log connection state changes
     useEffect(() => {
-        // Clear any pending debounce timer
-        if (debounceTimerRef.current) {
-            clearTimeout(debounceTimerRef.current);
-            debounceTimerRef.current = null;
-        }
-
-        if (!userId || !enabled) {
-            // Clean up if userId becomes undefined or disabled
-            realtimeLogger.info('Subscription disabled or no userId', {
-                userId,
-                enabled,
-                action: 'cleanup'
-            });
-
-            if (channelRef.current) {
-                supabaseRef.current?.removeChannel(channelRef.current);
-                channelRef.current = null;
-            }
-            subscriptionStateRef.current = {
-                isSubscribing: false,
-                isSubscribed: false,
-                retryCount: 0,
-                lastAttemptTimestamp: null
-            };
-            return;
-        }
-
-        // Check if channel already exists and is subscribed
-        if (channelRef.current?.state === REALTIME_CHANNEL_STATES.joined) {
-            realtimeLogger.info('Channel already subscribed, skipping setup', {
-                userId,
-                channelState: channelRef.current.state
-            });
-            return;
-        }
-
-        // If channel exists but is not joined, remove it first to prevent duplicate subscription errors
-        if (channelRef.current) {
-            const currentState = channelRef.current.state;
-            realtimeLogger.info('Removing existing channel before creating new one', {
-                userId,
-                currentChannelState: currentState
-            });
-            supabaseRef.current?.removeChannel(channelRef.current);
-            channelRef.current = null;
-        }
-
-        // Debounce subscription attempts to prevent rapid re-subscriptions
-        realtimeLogger.info('Scheduling subscription attempt with debounce', {
+        console.log('📊 [QueueMonitor] Connection state:', {
+            isConnected,
+            connectionState: subscription.connectionState,
             userId,
-            debounceDelay: DEBOUNCE_DELAY,
-            currentState: subscriptionStateRef.current
         });
+    }, [isConnected, subscription.connectionState, userId]);
 
-        debounceTimerRef.current = setTimeout(() => {
-            const state = subscriptionStateRef.current;
-            const now = Date.now();
-
-            // Enhanced state checking - verify multiple conditions before subscribing
-            const channelState = channelRef.current?.state;
-            const isChannelJoined = channelState === REALTIME_CHANNEL_STATES.joined;
-            const isAlreadySubscribed = isChannelJoined || state.isSubscribed;
-
-            // Check if we're already in the process of subscribing
-            if (state.isSubscribing) {
-                realtimeLogger.info('Subscription already in progress, skipping', {
-                    userId,
-                    channelState,
-                    subscriptionState: state
-                });
-                return;
-            }
-
-            // Check if already subscribed
-            if (isAlreadySubscribed) {
-                realtimeLogger.info('Already subscribed to fal_jobs, skipping', {
-                    userId,
-                    channelState,
-                    isChannelJoined,
-                    subscriptionState: state
-                });
-                return;
-            }
-
-            // Check if we should wait before retrying (timestamp verification)
-            if (state.lastAttemptTimestamp) {
-                const timeSinceLastAttempt = now - state.lastAttemptTimestamp;
-                const minRetryDelay = state.retryCount > 0 ? RETRY_DELAYS[Math.min(state.retryCount - 1, RETRY_DELAYS.length - 1)] : 0;
-
-                if (timeSinceLastAttempt < minRetryDelay) {
-                    realtimeLogger.info('Too soon to retry, waiting', {
-                        userId,
-                        timeSinceLastAttempt,
-                        minRetryDelay,
-                        retryCount: state.retryCount
-                    });
-                    return;
-                }
-            }
-
-            // Check if we've exceeded max retries
-            if (state.retryCount >= MAX_RETRIES) {
-                realtimeLogger.error('Max retries exceeded, giving up', {
-                    userId,
-                    retryCount: state.retryCount,
-                    maxRetries: MAX_RETRIES
-                });
-                return;
-            }
-
-            // Update subscription state
-            subscriptionStateRef.current = {
-                ...state,
-                isSubscribing: true,
-                lastAttemptTimestamp: now
-            };
-
-            realtimeLogger.info('Starting subscription attempt', {
+    // Update error state if realtime error occurs
+    useEffect(() => {
+        if (subscription.error) {
+            setError(new Error(subscription.error.message));
+            realtimeLogger.error('Realtime subscription error', {
                 userId,
-                attemptNumber: state.retryCount + 1,
-                maxRetries: MAX_RETRIES,
-                channelState,
-                timestamp: now
+                error: subscription.error.message,
+                type: subscription.error.type
             });
+        }
+    }, [subscription.error, userId]);
 
-            // Create and cache Supabase client
-            if (!supabaseRef.current) {
-                supabaseRef.current = createClient();
-            }
-            const supabase = supabaseRef.current;
-
-            // Use broadcast with recommended settings
-            // Following naming convention: scope:entity:id
-            const channel = supabase
-                .channel(`fal_jobs:${userId}`, {
-                    config: {
-                        broadcast: {
-                            self: false, // Don't receive our own broadcasts
-                            ack: true    // Enable ack for better reliability
-                        },
-                        private: true, // Use private channel for better security
-                    },
-                })
-                .on(
-                    'broadcast' as any,
-                    { event: 'INSERT' },
-                    handleJobUpdate
-                )
-                .on(
-                    'broadcast' as any,
-                    { event: 'UPDATE' },
-                    handleJobUpdate
-                )
-                .on(
-                    'broadcast' as any,
-                    { event: 'DELETE' },
-                    handleJobUpdate
-                );
-
-            channelRef.current = channel;
-
-            realtimeLogger.info('Channel created, getting session', {
-                userId,
-                channelTopic: `fal_jobs:${userId}`
-            });
-
-            // Get the current session and set auth before subscribing (required for private channels)
-            supabase.auth.getSession()
-                .then(({ data: { session }, error: sessionError }) => {
-                    if (sessionError) {
-                        realtimeLogger.error('Error getting session', {
-                            userId,
-                            error: sessionError.message,
-                            errorCode: sessionError.code,
-                            retryCount: state.retryCount
-                        });
-                        subscriptionStateRef.current.isSubscribing = false;
-                        return;
-                    }
-
-                    if (!session) {
-                        realtimeLogger.error('No active session found', {
-                            userId,
-                            note: 'User must be logged in to use private channels',
-                            retryCount: state.retryCount
-                        });
-                        subscriptionStateRef.current.isSubscribing = false;
-                        return;
-                    }
-
-                    // Debug: Log session details
-                    realtimeLogger.debugConnectionState(`fal_jobs:${userId}`, {
-                        hasSession: true,
-                        sessionExpiry: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown',
-                        retryCount: state.retryCount
-                    });
-
-                    realtimeLogger.info('Session found, setting auth for realtime', {
-                        userId,
-                        sessionUserId: session.user.id,
-                        sessionExpiresIn: session.expires_at ? Math.floor((session.expires_at * 1000 - Date.now()) / 1000) + 's' : 'unknown',
-                        retryCount: state.retryCount
-                    });
-
-                    // Set auth with the current session token
-                    supabase.realtime.setAuth(session.access_token);
-
-                    realtimeLogger.info('Auth set for realtime, waiting 2s before subscribing', {
-                        userId,
-                        retryCount: state.retryCount
-                    });
-
-                    // Wait 2 seconds for auth to propagate to Realtime server (increased from 1s)
-                    return new Promise(resolve => setTimeout(resolve, 2000));
-                })
-                .then(() => {
-                    realtimeLogger.info('Delay complete, subscribing to channel now', {
-                        userId,
-                        channelTopic: `fal_jobs:${userId}`
-                    });
-
-                    // Subscribe after auth is set and delay
-                    return channel.subscribe((status, err) => {
-                        const logContext = {
-                            userId,
-                            channelTopic: `fal_jobs:${userId}`,
-                            retryCount: subscriptionStateRef.current.retryCount,
-                            channelState: channel.state
-                        };
-
-                        realtimeLogger.info('Subscription status update', {
-                            ...logContext,
-                            status,
-                            error: err
-                        });
-
-                        switch (status) {
-                            case REALTIME_SUBSCRIBE_STATES.SUBSCRIBED:
-                                realtimeLogger.success('SUBSCRIBED - Successfully connected to fal_jobs channel', logContext);
-                                subscriptionStateRef.current = {
-                                    isSubscribing: false,
-                                    isSubscribed: true,
-                                    retryCount: 0, // Reset retry count on success
-                                    lastAttemptTimestamp: Date.now()
-                                };
-                                break;
-
-                            case REALTIME_SUBSCRIBE_STATES.CHANNEL_ERROR:
-                                realtimeLogger.error('CHANNEL_ERROR - Subscription failed', {
-                                    ...logContext,
-                                    error: err,
-                                    errorMessage: err?.message || 'Unknown error',
-                                    note: 'Will retry with exponential backoff'
-                                });
-                                subscriptionStateRef.current = {
-                                    isSubscribing: false,
-                                    isSubscribed: false,
-                                    retryCount: subscriptionStateRef.current.retryCount + 1,
-                                    lastAttemptTimestamp: Date.now()
-                                };
-                                break;
-
-                            case REALTIME_SUBSCRIBE_STATES.TIMED_OUT:
-                                realtimeLogger.error('TIMED_OUT - Subscription attempt timed out', {
-                                    ...logContext,
-                                    note: 'Will retry with exponential backoff',
-                                    nextRetryDelay: RETRY_DELAYS[Math.min(subscriptionStateRef.current.retryCount, RETRY_DELAYS.length - 1)]
-                                });
-                                subscriptionStateRef.current = {
-                                    isSubscribing: false,
-                                    isSubscribed: false,
-                                    retryCount: subscriptionStateRef.current.retryCount + 1,
-                                    lastAttemptTimestamp: Date.now()
-                                };
-                                break;
-
-                            case REALTIME_SUBSCRIBE_STATES.CLOSED:
-                                realtimeLogger.info('CLOSED - Channel connection closed', logContext);
-                                subscriptionStateRef.current = {
-                                    isSubscribing: false,
-                                    isSubscribed: false,
-                                    retryCount: subscriptionStateRef.current.retryCount,
-                                    lastAttemptTimestamp: Date.now()
-                                };
-                                break;
-
-                            default:
-                                realtimeLogger.info('Status update', {
-                                    ...logContext,
-                                    status,
-                                    error: err
-                                });
-                        }
-                    });
-                })
-                .catch((error) => {
-                    realtimeLogger.error('Error during subscription process', {
-                        userId,
-                        error: error instanceof Error ? error.message : error,
-                        retryCount: state.retryCount
-                    });
-                    subscriptionStateRef.current = {
-                        isSubscribing: false,
-                        isSubscribed: false,
-                        retryCount: subscriptionStateRef.current.retryCount + 1,
-                        lastAttemptTimestamp: Date.now()
-                    };
-                });
-        }, DEBOUNCE_DELAY);
-
-        // Cleanup only on unmount or userId change
-        return () => {
-            // Only cleanup if userId actually changed or component unmounting
-            const shouldCleanup = !userId || !enabled;
-
-            realtimeLogger.info('Effect cleanup triggered', {
-                userId,
-                shouldCleanup,
-                channelState: channelRef.current?.state,
-                subscriptionState: subscriptionStateRef.current
-            });
-
-            // Clear debounce timer
-            if (debounceTimerRef.current) {
-                clearTimeout(debounceTimerRef.current);
-                debounceTimerRef.current = null;
-            }
-
-            // Only remove channel if we should cleanup (userId changed or disabled)
-            if (shouldCleanup) {
-                realtimeLogger.info('Cleaning up subscription for fal_jobs', {
-                    userId,
-                    reason: !userId ? 'no userId' : 'disabled'
-                });
-
-                // Reset subscription state
-                subscriptionStateRef.current = {
-                    isSubscribing: false,
-                    isSubscribed: false,
-                    retryCount: 0,
-                    lastAttemptTimestamp: null
-                };
-
-                // Remove channel
-                if (channelRef.current && supabaseRef.current) {
-                    supabaseRef.current.removeChannel(channelRef.current);
-                    channelRef.current = null;
-                    realtimeLogger.success('Channel removed successfully', { userId });
-                }
-            }
-        };
-    }, [userId, enabled]);
+    // [DEBUG] Log return values
+    console.log('🔄 [useQueueMonitor] Returning values:', {
+        jobCount: jobs.length,
+        activeCount,
+        isLoading,
+        isConnected,
+        hasError: !!error,
+        timestamp: new Date().toISOString(),
+    });
 
     return {
         jobs,
         activeCount,
         isLoading,
         error,
+        isConnected,
         refresh: fetchJobs,
         addJobOptimistically,
         removeJob,

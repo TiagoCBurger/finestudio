@@ -1,64 +1,77 @@
 /**
- * Tests for Provider Factory
+ * Testes para Provider Factory
  */
 
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 import {
-    getProviderForModel,
-    isModelSupported,
-    getProviderName,
+    getImageProvider,
+    getProviderByModelId,
+    clearProviderCache,
+    type ProviderType,
 } from '../provider-factory';
-import { FalImageProvider } from '../fal.server.v2';
-import { KieImageProvider } from '../kie.server.v2';
+import { KieImageProvider } from '../kie.server';
 
 describe('Provider Factory', () => {
-    describe('getProviderForModel', () => {
-        it('should return FalImageProvider for fal- models', () => {
-            const provider = getProviderForModel('fal-nano-banana');
-            expect(provider).toBeInstanceOf(FalImageProvider);
-            expect(provider.providerName).toBe('fal');
-        });
+    beforeEach(() => {
+        // Limpar cache antes de cada teste
+        clearProviderCache();
+    });
 
-        it('should return KieImageProvider for kie- models', () => {
-            const provider = getProviderForModel('kie-nano-banana');
+    describe('getImageProvider', () => {
+        it('should create KIE provider', () => {
+            const provider = getImageProvider('kie');
             expect(provider).toBeInstanceOf(KieImageProvider);
-            expect(provider.providerName).toBe('kie');
         });
 
-        it('should throw error for unknown model', () => {
+        it('should cache provider instances', () => {
+            const provider1 = getImageProvider('kie');
+            const provider2 = getImageProvider('kie');
+            expect(provider1).toBe(provider2); // Mesma instância
+        });
+
+        it('should throw error for unknown provider', () => {
             expect(() => {
-                getProviderForModel('unknown-model');
-            }).toThrow('Unknown provider for model');
+                getImageProvider('unknown' as ProviderType);
+            }).toThrow('Unknown provider type');
+        });
+
+        it('should throw error for fal provider (not implemented)', () => {
+            expect(() => {
+                getImageProvider('fal');
+            }).toThrow('Fal provider not implemented yet in v2');
         });
     });
 
-    describe('isModelSupported', () => {
-        it('should return true for fal- models', () => {
-            expect(isModelSupported('fal-nano-banana')).toBe(true);
+    describe('getProviderByModelId', () => {
+        it('should return KIE provider for google/ models', () => {
+            const provider = getProviderByModelId('google/nano-banana');
+            expect(provider).toBeInstanceOf(KieImageProvider);
         });
 
-        it('should return true for kie- models', () => {
-            expect(isModelSupported('kie-nano-banana')).toBe(true);
+        it('should return KIE provider for google/ edit models', () => {
+            const provider = getProviderByModelId('google/nano-banana-edit');
+            expect(provider).toBeInstanceOf(KieImageProvider);
         });
 
-        it('should return false for unknown models', () => {
-            expect(isModelSupported('unknown-model')).toBe(false);
+        it('should throw error for fal- models (not implemented)', () => {
+            expect(() => {
+                getProviderByModelId('fal-nano-banana');
+            }).toThrow('Fal provider not implemented yet in v2');
+        });
+
+        it('should throw error for unknown model format', () => {
+            expect(() => {
+                getProviderByModelId('unknown-model');
+            }).toThrow('Cannot determine provider for model');
         });
     });
 
-    describe('getProviderName', () => {
-        it('should return "fal" for fal- models', () => {
-            expect(getProviderName('fal-nano-banana')).toBe('fal');
-        });
-
-        it('should return "kie" for kie- models', () => {
-            expect(getProviderName('kie-nano-banana')).toBe('kie');
-        });
-
-        it('should throw error for unknown models', () => {
-            expect(() => {
-                getProviderName('unknown-model');
-            }).toThrow('Unknown provider for model');
+    describe('clearProviderCache', () => {
+        it('should clear cached providers', () => {
+            const provider1 = getImageProvider('kie');
+            clearProviderCache();
+            const provider2 = getImageProvider('kie');
+            expect(provider1).not.toBe(provider2); // Instâncias diferentes
         });
     });
 });

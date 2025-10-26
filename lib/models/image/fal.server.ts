@@ -1,257 +1,198 @@
+/**
+ * Fal.ai Image Provider (v2)
+ * 
+ * Refactored provider using ImageProviderBase for cleaner, more maintainable code.
+ * Handles image generation and editing using Fal.ai API.
+ */
+
 import { fal } from '@fal-ai/client';
 import { env } from '@/lib/env';
-import type { ImageModel, ImageModelCallWarning } from 'ai';
-import { currentUser } from '@/lib/auth';
-import { createFalJob } from '@/lib/fal-jobs';
+import { ImageProviderBase } from './provider-base';
+import type {
+    ImageGenerationInput,
+    JobSubmissionResult,
+} from './types';
 
-const models = [
-    'fal-ai/nano-banana/edit',
-    'fal-ai/gpt-image',
-    'fal-ai/gpt-image-1/edit-image/byok',
-    'fal-ai/flux/dev/image-to-image',
-    'fal-ai/flux-pro/kontext',
-    'fal-ai/flux-pro/kontext/max/multi',
-    'fal-ai/ideogram/character',
-] as const;
-
-type FalModel = (typeof models)[number];
-
-type FalImageOutput = {
-    images: Array<{
-        url: string;
+/**
+ * Fal.ai specific input structure
+ */
+interface FalApiInput {
+    prompt: string;
+    num_images: number;
+    image_size?: {
         width: number;
         height: number;
-        content_type: string;
-    }>;
-    seed: number;
-    has_nsfw_concepts?: boolean[];
-    prompt: string;
-};
+    };
+    image_url?: string;
+    image_urls?: string[];
+    strength?: number;
+    seed?: number;
+}
 
-export const falAIServer = {
-    image: (modelId: FalModel): ImageModel => ({
-        modelId,
-        provider: 'fal',
-        specificationVersion: 'v2',
-        maxImagesPerCall: 1,
-        doGenerate: async ({
-            prompt,
-            seed,
-            size,
-            providerOptions,
-        }) => {
-            const [width, height] = size?.split('x').map(Number) ?? [1024, 1024];
+/**
+ * Fal.ai Image Provider
+ * 
+ * Supports:
+ * - Text-to-image generation
+ * - Image-to-image editing
+ * - Multiple image inputs (for models like Nano Banana)
+ * - Webhook-based async processing
+ */
+export class FalImageProvider extends ImageProviderBase {
+    readonly providerName = 'fal';
 
-            // Build input based on model type
-            const input: Record<string, unknown> = {
-                prompt,
-                num_images: 1,
-            };
+    /**
+     * Submit job to Fal.ai API
+     * 
+     * @param input - Image generation input
+     * @returns Job submission result with request ID
+     */
+    protected async submitToExternalAPI(
+        input: ImageGenerationInput
+    ): Promise<JobSubmissionResult> {
+        // Configure Fal.ai credentials
+        fal.config({
+            credentials: env.FAL_API_KEY,
+        });
 
-            // 🔍 DEBUG: Log completo dos providerOptions
-            console.log('🔍 DEBUG providerOptions:', {
-                hasProviderOptions: !!providerOptions,
-                hasFal: !!providerOptions?.fal,
-                falKeys: providerOptions?.fal ? Object.keys(providerOptions.fal) : [],
-                falImage: providerOptions?.fal?.image,
-                falImages: providerOptions?.fal?.images,
-                fullProviderOptions: JSON.stringify(providerOptions, null, 2),
-            });
+        // Prepare input for Fal.ai API
+        const falInput = this.prepareFalInput(input);
 
-            // Nano Banana has different format
-            const isNanoBanana = modelId === 'fal-ai/nano-banana/edit';
-            const isGptImageEdit = modelId === 'fal-ai/gpt-image-1/edit-image/byok';
-            const isFluxImageToImage = modelId === 'fal-ai/flux/dev/image-to-image';
+        console.log('[Fal] Submitting job:', {
+            modelId: input.modelId,
+            hasImages: !!input.images?.length,
+            imageCount: input.images?.length || 0,
+            size: input.size,
+        });
 
-            if (isNanoBanana) {
-                // Nano Banana supports multiple images natively!
-                const images = providerOptions?.fal?.images;
-                if (Array.isArray(images) && images.length > 0) {
-                    input.image_urls = images; // Use all images
-                    input.strength = 0.75;
-                } else if (typeof providerOptions?.fal?.image === 'string') {
-                    input.image_urls = [providerOptions.fal.image]; // Single image
-                    input.strength = 0.75;
-                } else {
-                    // Nano Banana REQUIRES images
-                    throw new Error('Nano Banana model requires at least one image. Please connect an image node to this node.');
-                }
-            } else if (isGptImageEdit) {
-                // GPT Image Edit requires image_urls array and OpenAI API key
-                const images = providerOptions?.fal?.images;
-                if (Array.isArray(images) && images.length > 0) {
-                    input.image_urls = images;
-                } else if (typeof providerOptions?.fal?.image === 'string') {
-                    input.image_urls = [providerOptions.fal.image];
-                } else {
-                    // GPT Image Edit REQUIRES images
-                    throw new Error('GPT Image Edit model requires at least one image. Please connect an image node to this node.');
-                }
+        // Determine if webhook is available
+        const webhookUrl = process.env.NEXT_PUBLIC_APP_URL
+            ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/fal`
+            : undefined;
 
-                // OpenAI API key is required for BYOK model
-                const openaiKey = providerOptions?.fal?.openai_api_key || env.OPENAI_API_KEY;
-                if (!openaiKey) {
-                    throw new Error('OpenAI API key is required for GPT Image Edit model');
-                }
-                input.openai_api_key = openaiKey;
-            } else if (isFluxImageToImage) {
-                // FLUX Dev Image-to-Image
-                input.image_size = {
-                    width,
-                    height,
-                };
+        if (!webhookUrl) {
+            throw new Error(
+                'NEXT_PUBLIC_APP_URL is required for Fal.ai webhook mode. ' +
+                'Please configure it in your environment variables.'
+            );
+        }
 
-                if (typeof providerOptions?.fal?.image === 'string') {
-                    input.image_url = providerOptions.fal.image;
-                    const strengthValue = providerOptions?.fal?.strength;
-                    input.strength = typeof strengthValue === 'string' ? parseFloat(strengthValue) :
-                        typeof strengthValue === 'number' ? strengthValue : 0.95;
-                }
+        console.log('[Fal] Using webhook mode:', webhookUrl);
+
+        // Submit to Fal.ai queue
+        const submission = await fal.queue.submit(input.modelId, {
+            input: falInput,
+            webhookUrl,
+        });
+
+        console.log('[Fal] Job submitted successfully:', {
+            requestId: submission.request_id,
+            webhookUrl,
+        });
+
+        // Return result (webhook will complete later)
+        return {
+            requestId: submission.request_id,
+            jobId: '', // Will be filled by base class
+            mode: 'webhook' as const,
+            webhookUrl,
+        };
+    }
+
+    /**
+     * Prepare input for Fal.ai API based on model type
+     */
+    private prepareFalInput(input: ImageGenerationInput): FalApiInput {
+        const falInput: FalApiInput = {
+            prompt: input.prompt,
+            num_images: 1,
+        };
+
+        // Parse size if provided
+        if (input.size) {
+            const parsedSize = this.parseSize(input.size);
+            if (parsedSize) {
+                falInput.image_size = parsedSize;
+            }
+        }
+
+        // Handle image inputs based on model type
+        const isNanoBanana = input.modelId === 'fal-ai/nano-banana/edit';
+        const isGptImageEdit = input.modelId === 'fal-ai/gpt-image-1/edit-image/byok';
+        const isFluxImageToImage = input.modelId === 'fal-ai/flux/dev/image-to-image';
+
+        if (isNanoBanana) {
+            // Nano Banana supports multiple images natively
+            if (input.images && input.images.length > 0) {
+                falInput.image_urls = input.images;
+                falInput.strength = 0.75;
             } else {
-                // Standard FLUX models
-                input.image_size = {
-                    width,
-                    height,
-                };
-
-                if (typeof providerOptions?.fal?.image === 'string') {
-                    input.image_url = providerOptions.fal.image;
-                    input.strength = 0.75;
-                }
+                throw new Error(
+                    'Nano Banana model requires at least one image. ' +
+                    'Please connect an image node to this node.'
+                );
+            }
+        } else if (isGptImageEdit) {
+            // GPT Image Edit requires image_urls array
+            if (input.images && input.images.length > 0) {
+                falInput.image_urls = input.images;
+            } else {
+                throw new Error(
+                    'GPT Image Edit model requires at least one image. ' +
+                    'Please connect an image node to this node.'
+                );
             }
 
-            if (seed !== undefined) {
-                input.seed = seed;
+            // OpenAI API key is required for BYOK model
+            const openaiKey = env.OPENAI_API_KEY;
+            if (!openaiKey) {
+                throw new Error(
+                    'OpenAI API key is required for GPT Image Edit model. ' +
+                    'Please configure OPENAI_API_KEY in your environment variables.'
+                );
             }
-
-            console.log('🔍 Fal.ai queue request:', {
-                modelId,
-                isNanoBanana: modelId === 'fal-ai/nano-banana/edit',
-                isGptImageEdit: modelId === 'fal-ai/gpt-image-1/edit-image/byok',
-                isFluxImageToImage: modelId === 'fal-ai/flux/dev/image-to-image',
-                hasImageUrl: !!input.image_url,
-                hasImageUrls: !!input.image_urls,
-                hasOpenAIKey: !!input.openai_api_key,
-                inputKeys: Object.keys(input),
-                fullInput: JSON.stringify(input, null, 2),
-            });
-
-            // Configure credentials (must be done here to avoid client-side access)
-            fal.config({
-                credentials: env.FAL_API_KEY,
-            });
-
-            // Determinar modo de operação ANTES de submeter (evita cobrança dupla)
-            // - Webhook: Produção/desenvolvimento com túnel (mais rápido, não bloqueia)
-            // - Fallback: Apenas desenvolvimento sem túnel (mais lento, bloqueia)
-            const useWebhook = !!process.env.NEXT_PUBLIC_APP_URL;
-            const webhookUrl = useWebhook
-                ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/fal`
-                : undefined;
-
-            console.log('🚀 Fal.ai submission mode:', {
-                mode: useWebhook ? 'WEBHOOK (production/tunnel)' : 'FALLBACK (dev only)',
-                webhookUrl: webhookUrl || 'N/A',
-                hasAppUrl: !!process.env.NEXT_PUBLIC_APP_URL,
-                appUrl: process.env.NEXT_PUBLIC_APP_URL,
-            });
-
-            let result: FalImageOutput;
-
-            if (useWebhook) {
-                // Modo webhook: submeter primeiro e criar job depois para evitar race condition
-                const user = await currentUser();
-                if (!user) {
-                    throw new Error('User not authenticated');
-                }
-
-                // Extrair metadados do providerOptions
-                const nodeId = providerOptions?.fal?.nodeId;
-                const projectId = providerOptions?.fal?.projectId;
-
-                console.log('🚀 Submitting to fal.ai queue...');
-
-                // Submeter para a fila PRIMEIRO
-                const submission = await fal.queue.submit(modelId, {
-                    input,
-                    webhookUrl,
-                });
-
-                const request_id = submission.request_id;
-
-                console.log('✅ Fal.ai queue submitted:', { request_id, useWebhook });
-
-                // Criar job no banco DEPOIS com o request_id real
-                // Isso evita race condition onde webhook chega antes do job existir
-                const jobId = await createFalJob({
-                    requestId: request_id,
-                    userId: user.id,
-                    modelId,
-                    type: 'image',
-                    input: {
-                        ...input,
-                        // Adicionar metadados para atualização do project
-                        _metadata: {
-                            nodeId,
-                            projectId,
-                        },
-                    },
-                });
-
-                console.log('✅ Job created with ID:', jobId);
-
-                // IMPORTANTE: Retornar estrutura compatível com AI SDK
-                // O AI SDK espera pelo menos uma imagem, então retornamos um placeholder vazio
-                return {
-                    images: [new Uint8Array(0)], // Placeholder vazio para indicar modo webhook
-                    warnings: [],
-                    response: {
-                        timestamp: new Date(),
-                        modelId,
-                        headers: {
-                            'x-fal-request-id': request_id,
-                            'x-fal-status': 'pending',
-                            'x-job-id': jobId, // Adicionar jobId para atualização otimista da fila
-                        },
-                    },
-                };
+            (falInput as any).openai_api_key = openaiKey;
+        } else if (isFluxImageToImage) {
+            // FLUX Dev Image-to-Image uses single image_url
+            if (input.images && input.images.length > 0) {
+                falInput.image_url = input.images[0];
+                falInput.strength = 0.95;
             }
-
-            // ⚠️ MODO FALLBACK (apenas desenvolvimento sem webhook)
-            // Este modo bloqueia a requisição até completar (mais lento)
-            // Use apenas quando NEXT_PUBLIC_APP_URL não estiver configurado
-            console.log('⚠️ Using fallback polling mode (dev only, slower)');
-
-            const { request_id: fallbackRequestId } = await fal.queue.submit(modelId, {
-                input,
-                // SEM webhookUrl - polling direto na API fal.ai
-            });
-
-            result = (await fal.queue.result(modelId, {
-                requestId: fallbackRequestId,
-            })).data as FalImageOutput;
-
-            if (!result.images || result.images.length === 0) {
-                throw new Error('No images generated');
+        } else {
+            // Standard FLUX models (text-to-image)
+            // Images are optional for these models
+            if (input.images && input.images.length > 0) {
+                falInput.image_url = input.images[0];
+                falInput.strength = 0.75;
             }
+        }
 
-            const imageUrl = result.images[0].url;
-            const imageResponse = await fetch(imageUrl);
-            const imageBuffer = await imageResponse.arrayBuffer();
+        return falInput;
+    }
 
-            const warnings: ImageModelCallWarning[] = result.has_nsfw_concepts?.[0]
-                ? [{ type: 'other', message: 'NSFW content detected' }]
-                : [];
+    /**
+     * Parse size string to width/height object
+     * 
+     * @param size - Size string (e.g., "1024x768")
+     * @returns Width and height object, or null if invalid
+     */
+    private parseSize(size: string): { width: number; height: number } | null {
+        if (!size || !size.includes('x')) {
+            return null;
+        }
 
-            return {
-                images: [new Uint8Array(imageBuffer)],
-                warnings,
-                response: {
-                    timestamp: new Date(),
-                    modelId,
-                    headers: undefined,
-                },
-            };
-        },
-    }),
-};
+        const parts = size.split('x');
+        if (parts.length !== 2) {
+            return null;
+        }
+
+        const width = Number(parts[0]);
+        const height = Number(parts[1]);
+
+        if (isNaN(width) || isNaN(height)) {
+            return null;
+        }
+
+        return { width, height };
+    }
+}

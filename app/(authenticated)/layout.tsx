@@ -6,9 +6,12 @@ import {
   type SubscriptionContextType,
   SubscriptionProvider,
 } from '@/providers/subscription';
+import { RealtimeManagerProvider } from '@/providers/realtime-manager';
 import { ReactFlowProvider } from '@xyflow/react';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 type AuthenticatedLayoutProps = {
   children: ReactNode;
@@ -27,6 +30,24 @@ const AuthenticatedLayout = async ({ children }: AuthenticatedLayoutProps) => {
     return null;
   }
 
+  // Get access token for Realtime
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll() { },
+      },
+    }
+  );
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = session?.access_token || null;
+
   // Subscription system removed - all users have free access
   const plan: SubscriptionContextType['plan'] = 'free';
 
@@ -37,7 +58,9 @@ const AuthenticatedLayout = async ({ children }: AuthenticatedLayoutProps) => {
     >
       <GatewayProvider>
         <PostHogIdentifyProvider>
-          <ReactFlowProvider>{children}</ReactFlowProvider>
+          <RealtimeManagerProvider accessToken={accessToken}>
+            <ReactFlowProvider>{children}</ReactFlowProvider>
+          </RealtimeManagerProvider>
         </PostHogIdentifyProvider>
       </GatewayProvider>
     </SubscriptionProvider>

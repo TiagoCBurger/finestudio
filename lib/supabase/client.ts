@@ -1,7 +1,29 @@
 import { createBrowserClient } from '@supabase/ssr';
 import { realtimeLogger } from '@/lib/realtime-logger';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+// Singleton instance to prevent multiple WebSocket connections
+let supabaseInstance: SupabaseClient | null = null;
+
+/**
+ * Reset the Supabase client instance
+ * Useful for cleaning up on page reload or when reconnection is needed
+ */
+export const resetSupabaseClient = () => {
+  if (supabaseInstance) {
+    // Remove all channels before resetting
+    supabaseInstance.removeAllChannels();
+    supabaseInstance = null;
+    realtimeLogger.info('Supabase client reset');
+  }
+};
 
 export const createClient = () => {
+  // Return existing instance if available
+  if (supabaseInstance) {
+    return supabaseInstance;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -14,7 +36,17 @@ export const createClient = () => {
   // Production: 'error' to minimize logs
   const logLevel = realtimeLogger.getSupabaseLogLevel();
 
-  return createBrowserClient(supabaseUrl, supabaseAnonKey, {
+  realtimeLogger.info('Creating new Supabase client instance', {
+    url: supabaseUrl,
+    logLevel
+  });
+
+  supabaseInstance = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+      headers: {
+        'ngrok-skip-browser-warning': '1',
+      },
+    },
     realtime: {
       params: {
         log_level: logLevel,
@@ -35,4 +67,6 @@ export const createClient = () => {
       }
     }
   });
+
+  return supabaseInstance;
 };

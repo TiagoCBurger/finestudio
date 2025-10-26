@@ -72,6 +72,10 @@ export const TweetPrimitive = ({
             placeholder="Tweet ID"
             value={tweetId}
             onChange={({ target }) => setTweetId(target.value)}
+            onInput={(e) => setTweetId(e.currentTarget.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
             className="rounded-full"
           />
           <Button type="submit" className="rounded-full" disabled={loading}>

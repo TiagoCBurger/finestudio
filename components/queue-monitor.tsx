@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { List, Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,13 +19,12 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useQueueMonitor } from '@/hooks/use-queue-monitor';
+import { useQueueMonitorContext } from '@/providers/queue-monitor';
 import { QueueItem } from '@/components/queue-monitor/queue-item';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface QueueMonitorProps {
-    userId: string;
-    projectId?: string;
+    // Props não são mais necessários, usa o contexto
 }
 
 type QueueFilter = 'all' | 'pending' | 'completed' | 'failed';
@@ -36,8 +35,10 @@ type QueueFilter = 'all' | 'pending' | 'completed' | 'failed';
  * Displays a button with badge showing active job count.
  * Opens a modal with detailed job list when clicked.
  * Styled to match existing top-right buttons (Menu component).
+ * 
+ * Uses QueueMonitorContext to avoid duplicate subscriptions.
  */
-export function QueueMonitor({ userId, projectId }: QueueMonitorProps) {
+export function QueueMonitor({ }: QueueMonitorProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [filter, setFilter] = useState<QueueFilter>('all');
 
@@ -48,7 +49,29 @@ export function QueueMonitor({ userId, projectId }: QueueMonitorProps) {
         removeJob,
         clearCompleted,
         clearFailed,
-    } = useQueueMonitor({ userId, projectId });
+    } = useQueueMonitorContext();
+
+    // [DEBUG] Log quando jobs ou activeCount mudam
+    useEffect(() => {
+        console.log('🔄 [QueueMonitor] Component render/update:', {
+            jobCount: jobs.length,
+            activeCount,
+            isLoading,
+            jobIds: jobs.map(j => j.id),
+            timestamp: new Date().toISOString(),
+        });
+    }, [jobs, activeCount, isLoading]);
+
+    // [DEBUG] Force re-render when jobs change
+    const [renderKey, setRenderKey] = useState(0);
+    useEffect(() => {
+        console.log('🔄 [QueueMonitor] Jobs changed, forcing re-render:', {
+            jobCount: jobs.length,
+            activeCount,
+            renderKey,
+        });
+        setRenderKey(prev => prev + 1);
+    }, [jobs.length, activeCount]);
 
     // Filter jobs based on selected tab
     const filteredJobs = jobs.filter((job) => {
@@ -97,6 +120,7 @@ export function QueueMonitor({ userId, projectId }: QueueMonitorProps) {
                             <List className="size-4" />
                             {activeCount > 0 && (
                                 <Badge
+                                    key={`badge-${renderKey}-${activeCount}`}
                                     variant="default"
                                     className="absolute -top-1 -right-1 size-5 flex items-center justify-center p-0 text-[10px]"
                                     aria-label={`${activeCount} requisições ativas`}

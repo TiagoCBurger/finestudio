@@ -91,6 +91,35 @@ const nextConfig: NextConfig = {
   // This is required to support PostHog trailing slash API requests
   skipTrailingSlashRedirect: true,
 
+  // Add headers to bypass ngrok warning page
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'ngrok-skip-browser-warning',
+            value: '1',
+          },
+        ],
+      },
+      {
+        // Allow Next.js dev tools to work with ngrok
+        source: '/__nextjs_original-stack-frames',
+        headers: [
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
+          },
+          {
+            key: 'ngrok-skip-browser-warning',
+            value: '1',
+          },
+        ],
+      },
+    ];
+  },
+
   // biome-ignore lint/suspicious/useAwait: "rewrites is async"
   async rewrites() {
     return [

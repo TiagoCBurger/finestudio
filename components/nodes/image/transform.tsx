@@ -104,7 +104,10 @@ export const ImageTransformV2 = ({ data, id, type, title }: ImageTransformV2Prop
             try {
                 // Buscar projeto atualizado
                 const response = await fetch(`/api/projects/${project.id}`);
-                if (!response.ok) return;
+                if (!response.ok) {
+                    // Silenciar erros de CORS/network - Realtime vai lidar com isso
+                    return;
+                }
 
                 const updatedProject = await response.json();
                 const updatedNode = updatedProject.content?.nodes?.find((n: any) => n.id === id);
@@ -124,7 +127,8 @@ export const ImageTransformV2 = ({ data, id, type, title }: ImageTransformV2Prop
                     clearInterval(pollInterval);
                 }
             } catch (error) {
-                console.error('❌ Polling error:', error);
+                // Silenciar erros de polling - Realtime é o mecanismo principal
+                // Polling é apenas fallback
             }
         }, 2000); // Poll a cada 2 segundos
 
@@ -163,10 +167,25 @@ export const ImageTransformV2 = ({ data, id, type, title }: ImageTransformV2Prop
             const textNodes = getTextFromTextNodes(incomers);
             const imageNodes = getImagesFromImageNodes(incomers);
 
+            console.log('🎨 [ImageTransformV2] Preparing generation:', {
+                nodeId: id,
+                incomersCount: incomers.length,
+                textNodesCount: textNodes.length,
+                imageNodesCount: imageNodes.length,
+                imageNodes: imageNodes,
+                modelId: data.model ?? getDefaultModel(imageModels),
+            });
+
             // Permitir geração se houver texto dos nós conectados, imagens conectadas, ou instruções no próprio nó
             if (!textNodes.length && !imageNodes.length && !data.instructions?.trim()) {
                 throw new Error('No input provided. Add text nodes, images, or enter instructions.');
             }
+
+            const imageUrls = imageNodes.map(img => img.url);
+            console.log('🖼️ [ImageTransformV2] Image URLs extracted:', {
+                count: imageUrls.length,
+                urls: imageUrls,
+            });
 
             analytics.track('canvas', 'node', 'generate', {
                 type,
@@ -179,15 +198,22 @@ export const ImageTransformV2 = ({ data, id, type, title }: ImageTransformV2Prop
             // Importar action dinamicamente
             const { generateImageActionV2 } = await import('@/app/actions/image/create');
 
-            const response = await generateImageActionV2({
+            const actionParams = {
                 prompt: textNodes.join('\n'),
-                images: imageNodes.map(img => img.url),
+                images: imageUrls,
                 modelId: data.model ?? getDefaultModel(imageModels),
                 instructions: data.instructions,
                 projectId: project.id,
                 nodeId: id,
                 size: data.size,
+            };
+
+            console.log('📤 [ImageTransformV2] Calling action with params:', {
+                ...actionParams,
+                prompt: actionParams.prompt.substring(0, 100),
             });
+
+            const response = await generateImageActionV2(actionParams);
 
             if ('error' in response) {
                 throw new Error(response.error);

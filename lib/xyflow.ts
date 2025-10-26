@@ -5,6 +5,14 @@ import type { ImageNodeProps } from '@/components/nodes/image';
 import type { TextNodeProps } from '@/components/nodes/text';
 import type { TweetNodeProps } from '@/components/nodes/tweet';
 import type { Node } from '@xyflow/react';
+import type { ImageNodeState } from '@/lib/models/image/types';
+
+// Extended type for image nodes that includes state
+type ImageNodeWithState = ImageNodeProps & {
+  data: ImageNodeProps['data'] & {
+    state?: ImageNodeState;
+  };
+};
 
 export const getTextFromTextNodes = (nodes: Node[]) => {
   if (!Array.isArray(nodes)) {
@@ -88,6 +96,24 @@ export const getImagesFromImageNodes = (nodes: Node[]) => {
   }
 
   try {
+    console.log('🔍 [getImagesFromImageNodes] Processing nodes:', {
+      totalNodes: nodes.length,
+      imageNodes: nodes.filter(n => n.type === 'image').length,
+      nodeDetails: nodes.filter(n => n.type === 'image').map(n => {
+        const data = n.data as ImageNodeWithState['data'];
+        return {
+          id: n.id,
+          hasContent: !!data?.content,
+          hasGenerated: !!data?.generated,
+          hasState: !!data?.state,
+          stateStatus: data?.state?.status,
+          stateUrl: data?.state?.status === 'ready' ? data.state.url : undefined,
+          content: data?.content,
+          generated: data?.generated,
+        };
+      })
+    });
+
     const sourceImages = nodes
       .filter((node) => node.type === 'image' && node.data)
       .map((node) => {
@@ -104,7 +130,30 @@ export const getImagesFromImageNodes = (nodes: Node[]) => {
       })
       .filter(Boolean) as { url: string; type: string }[];
 
-    return [...sourceImages, ...generatedImages];
+    // NOVO: Também pegar imagens do state.url quando status é 'ready'
+    const stateImages = nodes
+      .filter((node) => node.type === 'image' && node.data)
+      .map((node) => {
+        const data = node.data as ImageNodeWithState['data'];
+        // Se tem state.url e status é ready, usar essa URL
+        if (data?.state?.status === 'ready') {
+          return { url: data.state.url, type: 'image/png' };
+        }
+        return null;
+      })
+      .filter(Boolean) as { url: string; type: string }[];
+
+    const allImages = [...sourceImages, ...generatedImages, ...stateImages];
+
+    console.log('🔍 [getImagesFromImageNodes] Results:', {
+      sourceCount: sourceImages.length,
+      generatedCount: generatedImages.length,
+      stateCount: stateImages.length,
+      totalCount: allImages.length,
+      urls: allImages.map(img => img.url)
+    });
+
+    return allImages;
   } catch (error) {
     console.error('Error in getImagesFromImageNodes:', error);
     console.error('Problematic nodes:', nodes);

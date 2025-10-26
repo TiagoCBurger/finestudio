@@ -12,6 +12,7 @@ import type {
     ImageGenerationInput,
     JobSubmissionResult,
 } from './types';
+import type { ImageModel } from 'ai';
 
 /**
  * Fal.ai specific input structure
@@ -196,3 +197,18 @@ export class FalImageProvider extends ImageProviderBase {
         return { width, height };
     }
 }
+
+/**
+ * Fal AI Server - AI SDK compatible interface
+ */
+export const falAIServer = {
+    image: (modelId: string): ImageModel => ({
+        modelId,
+        provider: 'fal' as const,
+        specificationVersion: 'v2' as const,
+        maxImagesPerCall: 1,
+        doGenerate: async () => {
+            throw new Error('Fal image generation should use the provider-based system, not AI SDK directly');
+        },
+    }),
+};

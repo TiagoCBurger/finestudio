@@ -113,6 +113,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
 
       let onlyStateChanges = true;
       let hasStateChanges = false;
+      const stateChangedNodes: string[] = [];
 
       // Check if only node data.state changed
       for (const [id, newNode] of newNodesById) {
@@ -122,9 +123,9 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
           break;
         }
 
-        // Compare everything except data.state
-        const { state: newState, ...newDataRest } = (newNode.data || {}) as any;
-        const { state: currentState, ...currentDataRest } = (currentNode.data || {}) as any;
+        // Compare everything except data.state and data.updatedAt
+        const { state: newState, updatedAt: newUpdatedAt, ...newDataRest } = (newNode.data || {}) as any;
+        const { state: currentState, updatedAt: currentUpdatedAt, ...currentDataRest } = (currentNode.data || {}) as any;
 
         if (JSON.stringify(newDataRest) !== JSON.stringify(currentDataRest) ||
           newNode.position.x !== currentNode.position.x ||
@@ -135,6 +136,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
 
         if (JSON.stringify(newState) !== JSON.stringify(currentState)) {
           hasStateChanges = true;
+          stateChangedNodes.push(id);
         }
       }
 
@@ -143,7 +145,34 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
         console.log('✅ Allowing state-only update during pending changes:', {
           projectId: project?.id,
           hasStateChanges,
+          stateChangedNodes,
+          hasPendingChanges: hasPendingChangesRef.current,
+          isSaving: saveState.isSaving,
+          recentlySaved,
+          timeSinceLastSave,
         });
+
+        // Apply only the state changes to current nodes
+        setNodes(prevNodes => {
+          return prevNodes.map(node => {
+            const newNode = newNodesById.get(node.id);
+            if (newNode && stateChangedNodes.includes(node.id)) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  state: (newNode.data as any)?.state,
+                  updatedAt: (newNode.data as any)?.updatedAt,
+                }
+              };
+            }
+            return node;
+          });
+        });
+
+        // Update the ref to prevent repeated updates
+        prevContentRef.current = contentString;
+        return;
       } else {
         console.log('⏸️ Skipping realtime update - local changes pending:', {
           hasPendingChanges: hasPendingChangesRef.current,

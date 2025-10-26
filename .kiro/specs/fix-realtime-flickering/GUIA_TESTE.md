@@ -1,245 +1,202 @@
-# Guia de Teste - Correções de Flickering e Perda de Dados
+# Guia de Teste: Correção de Flickering
 
-## Preparação
+## Objetivo
 
-1. **Abra o Console do Navegador** (F12 ou Cmd+Option+I)
-2. **Limpe o console** para ver apenas os novos logs
-3. **Recarregue a página** do projeto
+Verificar que a correção eliminou o problema de "flickering" onde nós voltavam temporariamente a estados anteriores ao regenerar imagens.
 
-## Testes a Realizar
+## Pré-requisitos
 
-### Teste 1: Edição Simples (Sem Flickering)
+1. Aplicação rodando localmente ou em staging
+2. Conta de usuário com créditos
+3. Console do navegador aberto para ver logs
 
-**Objetivo**: Verificar que não há flickering durante edições normais
+## Teste 1: Regenerar Imagem Simples
 
-**Passos**:
-1. Mova um nó no canvas
-2. Aguarde 2 segundos (tempo do save)
-3. Observe o console
+### Passos
 
-**Resultado Esperado**:
+1. Criar novo projeto
+2. Adicionar nó de texto com prompt: "A beautiful sunset over mountains"
+3. Adicionar nó de imagem
+4. Conectar texto → imagem
+5. Clicar em "Generate" no nó de imagem
+6. Aguardar imagem ser gerada
+7. Clicar em "Regenerate"
+
+### Resultado Esperado
+
+✅ **Comportamento Correto:**
+- Nó entra em estado "generating" imediatamente
+- Texto permanece inalterado durante toda a geração
+- Quando imagem completa, transição suave para "ready"
+- Nova imagem aparece sem mostrar imagem anterior
+
+❌ **Comportamento Incorreto (Bug):**
+- Texto volta temporariamente ao valor anterior
+- Imagem anterior aparece brevemente
+- "Flickering" visual
+
+### Logs Esperados
+
 ```
-✅ hasPendingChanges deve ser true durante o save
-✅ Deve aparecer "Skipping realtime update - local changes pending"
-✅ Após o save, deve aparecer "SWR revalidated successfully"
-✅ NÃO deve aparecer "Content changed via Realtime, updating canvas"
-✅ O nó NÃO deve "pular" ou voltar para posição anterior
-```
-
-**Resultado Incorreto** (se ainda houver problema):
-```
-❌ Múltiplos logs de "Content changed via Realtime"
-❌ O nó "pula" ou volta para posição anterior
-❌ Logs repetidos do mesmo conteúdo
-```
-
-### Teste 2: Edições Rápidas (Race Condition)
-
-**Objetivo**: Verificar que mudanças rápidas não são perdidas
-
-**Passos**:
-1. Mova um nó
-2. Imediatamente mova outro nó (antes de 1 segundo)
-3. Mova um terceiro nó (antes de 1 segundo)
-4. Aguarde 3 segundos
-5. Recarregue a página
-
-**Resultado Esperado**:
-```
-✅ Todos os 3 nós devem estar nas novas posições
-✅ Nenhuma mudança deve ser perdida
-✅ Console deve mostrar apenas 1 save (debounced)
-```
-
-### Teste 3: Múltiplas Abas (Sincronização)
-
-**Objetivo**: Verificar que mudanças em uma aba aparecem em outra
-
-**Passos**:
-1. Abra o mesmo projeto em 2 abas
-2. Na Aba 1: mova um nó
-3. Aguarde 2 segundos
-4. Observe a Aba 2
-
-**Resultado Esperado**:
-```
-✅ Aba 2 deve receber o update via Realtime
-✅ Aba 2 deve mostrar "Content changed via Realtime, updating canvas"
-✅ O nó deve aparecer na nova posição na Aba 2
-✅ NÃO deve haver flickering na Aba 2
-```
-
-### Teste 4: Edição Durante Realtime Update
-
-**Objetivo**: Verificar que edições locais têm prioridade sobre updates remotos
-
-**Passos**:
-1. Abra o mesmo projeto em 2 abas
-2. Na Aba 1: mova um nó para posição A
-3. Na Aba 2: IMEDIATAMENTE mova o mesmo nó para posição B
-4. Aguarde 3 segundos
-5. Observe ambas as abas
-
-**Resultado Esperado**:
-```
-✅ Aba 1 deve mostrar o nó na posição A
-✅ Aba 2 deve mostrar o nó na posição B
-✅ Após 3 segundos, ambas devem convergir para a última mudança salva
-✅ Console da Aba 2 deve mostrar "Skipping realtime update - local changes pending"
-```
-
-### Teste 5: Geração de Imagem (Webhook)
-
-**Objetivo**: Verificar que updates de webhook não causam flickering
-
-**Passos**:
-1. Adicione um nó de imagem
-2. Gere uma imagem
-3. Observe o console durante a geração
-4. Aguarde a imagem ser gerada
-
-**Resultado Esperado**:
-```
-✅ Durante a geração, deve aparecer "Skipping realtime update" se houver outras mudanças
-✅ Quando a imagem for gerada, deve aparecer "Content changed via Realtime"
-✅ A imagem deve aparecer sem flickering
-✅ Outros nós NÃO devem "pular" quando a imagem aparecer
-```
-
-## Logs Importantes a Observar
-
-### Logs Positivos (Indicam que está funcionando):
-
-```javascript
-// Proteção contra race condition funcionando
-⏸️ Skipping realtime update - local changes pending: {
-  hasPendingChanges: true,
-  isSaving: false,
-  recentlySaved: true,
-  timeSinceLastSave: 1234
+✅ Allowing state-only update during pending changes: {
+  projectId: "...",
+  hasStateChanges: true,
+  stateChangedNodes: ["image-node-id"],
+  ...
 }
-
-// Update legítimo do Realtime
-✅ Content changed via Realtime, updating canvas: {
-  nodesChanged: true,
-  edgesChanged: false
-}
-
-// SWR revalidando corretamente
-📊 [ProjectProvider] SWR revalidated successfully
 ```
 
-### Logs Negativos (Indicam problema):
+## Teste 2: Editar Texto Durante Geração
 
-```javascript
-// Loop infinito (NÃO deve aparecer repetidamente)
-🔄 Checking for canvas sync: { ... }
-✅ Content changed via Realtime, updating canvas: { ... }
-🔄 Checking for canvas sync: { ... }
-✅ Content changed via Realtime, updating canvas: { ... }
-// ... repetindo infinitamente
+### Passos
 
-// Múltiplas subscrições (NÃO deve aparecer)
-[Warning] Subscription already in progress or active
+1. Criar nó de texto com prompt: "A cat"
+2. Criar nó de imagem conectado
+3. Gerar imagem
+4. Enquanto imagem está gerando, editar texto para: "A dog"
+5. Aguardar geração completar
 
-// Erros de mutate (NÃO deve aparecer)
-❌ Error calling mutate()
+### Resultado Esperado
+
+✅ **Comportamento Correto:**
+- Edição do texto é preservada
+- Imagem gerada corresponde ao prompt original ("A cat")
+- Texto permanece como "A dog" após geração completar
+
+❌ **Comportamento Incorreto:**
+- Texto volta para "A cat" após geração
+- Edição é perdida
+
+## Teste 3: Múltiplas Regenerações Rápidas
+
+### Passos
+
+1. Criar nó de texto + imagem conectados
+2. Gerar imagem
+3. Clicar em "Regenerate" 3 vezes rapidamente (intervalo < 1s)
+
+### Resultado Esperado
+
+✅ **Comportamento Correto:**
+- Apenas a última regeneração é processada
+- Nó permanece em estado "generating" até completar
+- Sem flickering entre estados
+
+❌ **Comportamento Incorreto:**
+- Múltiplas gerações são iniciadas
+- Estados se sobrepõem causando flickering
+
+## Teste 4: Múltiplos Nós Simultâneos
+
+### Passos
+
+1. Criar 3 nós de texto diferentes
+2. Criar 3 nós de imagem
+3. Conectar cada texto a uma imagem
+4. Gerar todas as 3 imagens ao mesmo tempo
+5. Enquanto estão gerando, editar um dos textos
+
+### Resultado Esperado
+
+✅ **Comportamento Correto:**
+- Todas as 3 imagens geram corretamente
+- Edição do texto é preservada
+- Cada nó atualiza independentemente
+- Sem interferência entre nós
+
+## Teste 5: Regenerar com Nó de Texto Conectado
+
+### Passos
+
+1. Criar nó de texto: "Original prompt"
+2. Criar nó de imagem conectado
+3. Gerar imagem
+4. Editar texto para: "Modified prompt"
+5. Clicar em "Regenerate" na imagem
+6. Observar comportamento durante geração
+
+### Resultado Esperado
+
+✅ **Comportamento Correto:**
+- Texto permanece como "Modified prompt" durante toda a geração
+- Nova imagem usa o prompt modificado
+- Sem reversão do texto
+
+## Verificação de Logs
+
+### Logs Importantes
+
+1. **Atualização de Estado Permitida:**
+```
+✅ Allowing state-only update during pending changes
+```
+
+2. **Atualização Bloqueada (Esperado para mudanças estruturais):**
+```
+⏸️ Skipping realtime update - local changes pending
+```
+
+3. **Sincronização do Canvas:**
+```
+🔄 Checking for canvas sync
+✅ Content changed via Realtime, updating canvas
+```
+
+### Logs de Problema
+
+Se você ver estes logs, o bug ainda existe:
+
+```
+❌ Content changed but blocked due to pending save
+❌ State reverted to previous value
+❌ Image flickering detected
 ```
 
 ## Métricas de Sucesso
 
-### Antes das Correções:
-- Logs de "Content changed via Realtime": **10-20 por minuto** (mesmo sem mudanças)
-- Flickering: **Visível a cada 1-2 segundos**
-- Mudanças perdidas: **~10% das edições rápidas**
-
-### Depois das Correções:
-- Logs de "Content changed via Realtime": **Apenas quando há mudanças reais**
-- Flickering: **Nenhum durante edição local**
-- Mudanças perdidas: **0%**
+- [ ] Teste 1: Sem flickering ao regenerar
+- [ ] Teste 2: Edições preservadas durante geração
+- [ ] Teste 3: Múltiplas regenerações tratadas corretamente
+- [ ] Teste 4: Múltiplos nós funcionam independentemente
+- [ ] Teste 5: Texto conectado não reverte
 
 ## Troubleshooting
 
-### Se ainda houver flickering:
+### Se o flickering ainda ocorrer:
 
-1. **Verifique o tempo de proteção**:
-   ```typescript
-   // Em canvas.tsx, tente aumentar para 3 segundos
-   const recentlySaved = timeSinceLastSave < 3000;
-   ```
+1. **Verificar logs do console:**
+   - Procurar por "Allowing state-only update"
+   - Verificar se `onlyStateChanges` é `true`
 
-2. **Verifique o dedupingInterval**:
-   ```typescript
-   // Em project.tsx, tente aumentar para 1000ms
-   dedupingInterval: 1000,
-   ```
+2. **Verificar timing:**
+   - Logs devem mostrar `timeSinceLastSave`
+   - Verificar se está dentro do período de 2s
 
-3. **Desabilite temporariamente o Realtime**:
-   ```typescript
-   // Em use-project-realtime.ts
-   useRealtimeSubscription({
-     // ...
-     enabled: false, // Desabilita temporariamente
-   });
-   ```
+3. **Verificar estrutura do estado:**
+   - Estado deve estar em `node.data.state`
+   - Verificar se comparação JSON está funcionando
 
-### Se mudanças ainda forem perdidas:
+4. **Verificar Realtime:**
+   - Abrir DevTools → Network → WS
+   - Verificar se broadcasts estão chegando
+   - Verificar payload dos broadcasts
 
-1. **Verifique o debounce do save**:
-   ```typescript
-   // Em canvas.tsx, tente reduzir para 500ms
-   }, 500); // Antes era 1000
-   ```
+### Comandos Úteis
 
-2. **Adicione logs no save**:
-   ```typescript
-   console.log('💾 Saving:', {
-     nodeCount: newContent.nodes.length,
-     edgeCount: newContent.edges.length,
-     timestamp: Date.now()
-   });
-   ```
+```bash
+# Ver logs do Supabase Realtime
+supabase logs realtime --follow
 
-3. **Verifique erros de rede**:
-   - Abra a aba Network no DevTools
-   - Procure por requests falhando para `/api/projects/[id]`
+# Ver logs do banco de dados
+supabase logs postgres --follow
 
-## Comandos Úteis
-
-### Limpar cache do SWR (no console):
-```javascript
-// Força revalidação de todos os caches
-mutate(() => true, undefined, { revalidate: true });
+# Verificar triggers
+psql -c "SELECT * FROM pg_trigger WHERE tgname LIKE '%broadcast%';"
 ```
 
-### Verificar estado do Realtime:
-```javascript
-// No console
-RealtimeConnectionManager.getInstance().getConnectionState();
-```
+## Notas Adicionais
 
-### Forçar reconexão do Realtime:
-```javascript
-// No console
-RealtimeConnectionManager.getInstance().reconnect();
-```
-
-## Relatório de Teste
-
-Após realizar os testes, preencha:
-
-- [ ] Teste 1: Edição Simples - ✅ Passou / ❌ Falhou
-- [ ] Teste 2: Edições Rápidas - ✅ Passou / ❌ Falhou
-- [ ] Teste 3: Múltiplas Abas - ✅ Passou / ❌ Falhou
-- [ ] Teste 4: Edição Durante Update - ✅ Passou / ❌ Falhou
-- [ ] Teste 5: Geração de Imagem - ✅ Passou / ❌ Falhou
-
-**Observações**:
-```
-[Descreva qualquer comportamento inesperado ou logs estranhos]
-```
-
-**Próximos Passos**:
-```
-[Liste o que precisa ser ajustado, se houver]
-```
+- O período de bloqueio é de 2 segundos após cada save
+- Apenas mudanças em `data.state` e `data.updatedAt` passam durante bloqueio
+- Mudanças estruturais (posição, conexões) são corretamente bloqueadas
+- A correção não afeta performance ou funcionalidade existente

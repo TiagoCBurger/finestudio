@@ -7,6 +7,7 @@
 import { env } from '@/lib/env';
 import { ImageProviderBase } from './provider-base';
 import type { ImageGenerationInput } from './types';
+import type { ImageModel } from 'ai';
 
 /**
  * Máximo de imagens suportadas pelo KIE.ai
@@ -128,7 +129,12 @@ export class KieImageProvider extends ImageProviderBase {
         if (input.images && input.images.length > 0) {
             const isEditModel = input.modelId.includes('-edit');
 
-            console.log(`🖼️ [KIE] Adding ${input.images.length} image(s) to ${isEditModel ? 'edit' : 'generation'} request`);
+            console.log(`🖼️ [KIE] Adding ${input.images.length} image(s) to ${isEditModel ? 'edit' : 'generation'} request`, {
+                modelId: input.modelId,
+                isEditModel,
+                images: input.images,
+                expectedModel: isEditModel ? 'google/nano-banana-edit' : 'google/nano-banana',
+            });
 
             // Limitar a MAX_KIE_IMAGES
             apiInput.image_urls = input.images.slice(0, MAX_KIE_IMAGES);
@@ -138,7 +144,21 @@ export class KieImageProvider extends ImageProviderBase {
                     `⚠️ [KIE] Max ${MAX_KIE_IMAGES} images supported. ${input.images.length - MAX_KIE_IMAGES} image(s) ignored.`
                 );
             }
+        } else {
+            console.log('ℹ️ [KIE] No images provided, text-to-image generation', {
+                modelId: input.modelId,
+                hasImages: !!input.images,
+                imageCount: input.images?.length ?? 0,
+            });
         }
+
+        console.log('📋 [KIE] Final API input:', {
+            modelId: input.modelId,
+            hasImageUrls: !!apiInput.image_urls,
+            imageUrlsCount: apiInput.image_urls?.length ?? 0,
+            imageUrls: apiInput.image_urls,
+            prompt: apiInput.prompt.substring(0, 100),
+        });
 
         return apiInput;
     }
@@ -150,17 +170,27 @@ export class KieImageProvider extends ImageProviderBase {
         modelId: string,
         input: KieApiInput
     ): Promise<KieApiResponse> {
+        const requestBody = {
+            model: modelId,
+            callBackUrl: this.config.webhookUrl,
+            input,
+        };
+
+        console.log('📤 [KIE] Sending request to API:', {
+            model: modelId,
+            callBackUrl: this.config.webhookUrl,
+            hasImageUrls: !!input.image_urls,
+            imageUrlsCount: input.image_urls?.length ?? 0,
+            prompt: input.prompt.substring(0, 100) + (input.prompt.length > 100 ? '...' : ''),
+        });
+
         const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${env.KIE_API_KEY}`,
             },
-            body: JSON.stringify({
-                model: modelId,
-                callBackUrl: this.config.webhookUrl,
-                input,
-            }),
+            body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) {
@@ -213,3 +243,18 @@ export function createKieImageProvider(webhookUrl?: string): KieImageProvider {
         webhookUrl,
     });
 }
+
+/**
+ * KIE AI Server - AI SDK compatible interface
+ */
+export const kieAIServer = {
+    image: (modelId: 'google/nano-banana' | 'google/nano-banana-edit'): ImageModel => ({
+        modelId,
+        provider: 'kie' as const,
+        specificationVersion: 'v2' as const,
+        maxImagesPerCall: 1,
+        doGenerate: async () => {
+            throw new Error('KIE image generation should use the provider-based system, not AI SDK directly');
+        },
+    }),
+};

@@ -30,16 +30,8 @@ export function RealtimeManagerProvider({ children, accessToken }: RealtimeManag
         // Initialize RealtimeConnectionManager
         const manager = RealtimeConnectionManager.getInstance();
 
-        // Check if already initialized
-        if (!(manager as any).supabaseClient) {
-            realtimeLogger.info('Initializing RealtimeConnectionManager');
-            manager.initialize(supabase, accessToken);
-            realtimeLogger.success('RealtimeConnectionManager initialized');
-        } else {
-            // Update token if already initialized
-            realtimeLogger.info('Updating Realtime auth token');
-            (manager as any).handleSignIn(accessToken);
-        }
+        // The manager automatically initializes the Supabase client when needed
+        realtimeLogger.info('RealtimeConnectionManager ready');
     }, [accessToken]);
 
     return <>{children}</>;

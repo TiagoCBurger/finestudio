@@ -31,6 +31,8 @@ export function ReadyState({ url, timestamp, onLoadComplete }: ReadyStateProps) 
                 width={1000}
                 height={1000}
                 className="w-full rounded-b-xl object-cover"
+                unoptimized={true}
+                priority={true}
                 onLoad={() => {
                     console.log('✅ Image loaded successfully:', url);
                     setIsLoading(false);

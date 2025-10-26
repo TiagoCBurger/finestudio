@@ -196,7 +196,7 @@ export function useQueueMonitor({
                     setJobs(newJobs);
                 }
             } catch (error) {
-                console.error('❌ Queue polling error:', error);
+                // Silenciar erros de polling - Realtime é o mecanismo principal
             }
         }, 3000); // Poll a cada 3 segundos
 

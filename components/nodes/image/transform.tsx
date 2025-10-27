@@ -181,10 +181,22 @@ export const ImageTransformV2 = ({ data, id, type, title }: ImageTransformV2Prop
                 throw new Error('No input provided. Add text nodes, images, or enter instructions.');
             }
 
-            const imageUrls = imageNodes.map(img => img.url);
+            let imageUrls = imageNodes.map(img => img.url);
+
+            // Limitar a 1 imagem para modelos KIE
+            const currentModelId = data.model ?? getDefaultModel(imageModels);
+            const isKieModel = currentModelId.includes('kie-') || currentModelId.includes('google/');
+
+            if (isKieModel && imageUrls.length > 1) {
+                console.warn('⚠️ [ImageTransformV2] KIE models only support 1 image, limiting to first image');
+                imageUrls = imageUrls.slice(0, 1);
+            }
+
             console.log('🖼️ [ImageTransformV2] Image URLs extracted:', {
                 count: imageUrls.length,
                 urls: imageUrls,
+                isKieModel,
+                limited: isKieModel && imageNodes.length > 1,
             });
 
             analytics.track('canvas', 'node', 'generate', {

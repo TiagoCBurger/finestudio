@@ -19,6 +19,8 @@ type GenerateVideoActionProps = {
   }[];
   duration?: number;
   aspectRatio?: string;
+  negativePrompt?: string;
+  cfgScale?: number;
   nodeId: string;
   projectId: string;
 };
@@ -84,6 +86,8 @@ export const generateVideoAction = async ({
   images,
   duration = 5,
   aspectRatio = '16:9',
+  negativePrompt,
+  cfgScale,
   nodeId,
   projectId,
 }: GenerateVideoActionProps): Promise<
@@ -119,6 +123,8 @@ export const generateVideoAction = async ({
       imagePrompt: firstFrameImage || undefined, // Garantir que seja undefined, não null
       duration: duration as 5,
       aspectRatio,
+      negativePrompt,
+      cfgScale,
       // Pass metadata for webhook to update the correct node
       _metadata: {
         nodeId,

@@ -25,6 +25,7 @@ export const VideoPrimitive = ({
   const { updateNodeData } = useReactFlow();
   const [files, setFiles] = useState<File[] | undefined>();
   const [isUploading, setIsUploading] = useState(false);
+  const [isVideoLoading, setIsVideoLoading] = useState(true);
 
   const handleDrop = async (files: File[]) => {
     if (isUploading) {
@@ -57,7 +58,7 @@ export const VideoPrimitive = ({
 
   return (
     <NodeLayout id={id} data={data} type={type} title={title}>
-      {isUploading && (
+      {data.content && isVideoLoading && (
         <Skeleton className="flex aspect-video w-full animate-pulse items-center justify-center">
           <Loader2Icon
             size={16}
@@ -65,12 +66,14 @@ export const VideoPrimitive = ({
           />
         </Skeleton>
       )}
-      {!isUploading && data.content && (
+      {data.content && (
         <video
           src={data.content.url}
           className="h-auto w-full cursor-pointer"
+          style={{ display: isVideoLoading ? 'none' : 'block' }}
           muted
           loop
+          onLoadedData={() => setIsVideoLoading(false)}
           onMouseEnter={(e) => e.currentTarget.play()}
           onMouseLeave={(e) => {
             e.currentTarget.pause();
@@ -78,7 +81,7 @@ export const VideoPrimitive = ({
           }}
         />
       )}
-      {!isUploading && !data.content && (
+      {!data.content && (
         <Dropzone
           maxSize={1024 * 1024 * 10}
           minSize={1024}

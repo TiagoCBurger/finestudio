@@ -10,14 +10,45 @@ import { Position } from '@xyflow/react';
 
 const getHandleCoordsByPosition = (
   node: InternalNode<Node>,
-  handlePosition: Position
+  handlePosition: Position,
+  handleId?: string | null
 ) => {
   // Choose the handle type based on position - Left is for target, Right is for source
   const handleType = handlePosition === Position.Left ? 'target' : 'source';
 
-  const handle = node.internals.handleBounds?.[handleType]?.find(
-    (h) => h.position === handlePosition
-  );
+  // Se handleId for fornecido, procurar pelo handle específico
+  // Caso contrário, pegar o primeiro handle na posição
+  let handle;
+
+  if (handleId) {
+    // Primeiro tentar encontrar pelo ID exato
+    handle = node.internals.handleBounds?.[handleType]?.find(
+      (h) => h.id === handleId && h.position === handlePosition
+    );
+
+    // DEBUG: Log se encontrou o handle
+    if (handle) {
+      console.log('✅ [getHandleCoords] Found handle:', {
+        handleId,
+        handleType,
+        x: handle.x,
+        y: handle.y,
+      });
+    } else {
+      console.warn('⚠️ [getHandleCoords] Handle NOT found:', {
+        handleId,
+        handleType,
+        availableHandles: node.internals.handleBounds?.[handleType]?.map(h => h.id),
+      });
+    }
+  }
+
+  // Fallback: pegar o primeiro handle na posição
+  if (!handle) {
+    handle = node.internals.handleBounds?.[handleType]?.find(
+      (h) => h.position === handlePosition
+    );
+  }
 
   if (!handle) {
     return [0, 0];
@@ -54,12 +85,14 @@ const getHandleCoordsByPosition = (
 
 const getEdgeParams = (
   source: InternalNode<Node>,
-  target: InternalNode<Node>
+  target: InternalNode<Node>,
+  sourceHandleId?: string | null,
+  targetHandleId?: string | null
 ) => {
   const sourcePos = Position.Right;
-  const [sx, sy] = getHandleCoordsByPosition(source, sourcePos);
+  const [sx, sy] = getHandleCoordsByPosition(source, sourcePos, sourceHandleId);
   const targetPos = Position.Left;
-  const [tx, ty] = getHandleCoordsByPosition(target, targetPos);
+  const [tx, ty] = getHandleCoordsByPosition(target, targetPos, targetHandleId);
 
   return {
     sx,
@@ -71,13 +104,12 @@ const getEdgeParams = (
   };
 };
 
-export const AnimatedEdge = ({
-  id,
-  source,
-  target,
-  markerEnd,
-  style,
-}: EdgeProps) => {
+export const AnimatedEdge = (props: EdgeProps) => {
+  const { id, source, target, markerEnd, style } = props;
+  // Acessar sourceHandle e targetHandle diretamente do props (podem não estar no tipo)
+  const sourceHandle = (props as any).sourceHandle;
+  const targetHandle = (props as any).targetHandle;
+
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
 
@@ -85,9 +117,25 @@ export const AnimatedEdge = ({
     return null;
   }
 
+  // DEBUG: Log para verificar handles
+  console.log('🔍 [AnimatedEdge] Edge:', {
+    id,
+    sourceHandle,
+    targetHandle,
+    targetNodeId: target,
+    availableTargetHandles: targetNode.internals.handleBounds?.target?.map(h => ({
+      id: h.id,
+      x: h.x,
+      y: h.y,
+      position: h.position,
+    })),
+  });
+
   const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(
     sourceNode,
-    targetNode
+    targetNode,
+    sourceHandle,
+    targetHandle
   );
 
   const [edgePath] = getBezierPath({

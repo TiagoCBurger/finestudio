@@ -14,6 +14,8 @@ export type VideoModel = {
     imagePrompt: string | undefined;
     duration: number;
     aspectRatio: string;
+    negativePrompt?: string;
+    cfgScale?: number;
     _metadata?: {
       nodeId?: string;
       projectId?: string;
@@ -98,7 +100,10 @@ export const videoModels: Record<string, TersaVideoModel> = {
     providers: [
       {
         ...providers.kie,
-        model: kie('kling/v2-5-turbo-image-to-video-pro'),
+        model: kie(
+          'kling/v2-5-turbo-image-to-video-pro',
+          'kling/v2-5-turbo-text-to-video-pro'
+        ),
 
         // KIE pricing for Kling v2.5 Turbo Pro
         getCost: ({ duration }) => {

@@ -9,7 +9,7 @@ import { handleError } from '@/lib/error/handle';
 import { videoModels, getEnabledVideoModels } from '@/lib/models/video';
 import { getImagesFromImageNodes, getTextFromTextNodes } from '@/lib/xyflow';
 import { useProject } from '@/providers/project';
-import { getIncomers, useReactFlow } from '@xyflow/react';
+import { getIncomers, useReactFlow, Handle, Position } from '@xyflow/react';
 import {
   ClockIcon,
   DownloadIcon,
@@ -31,6 +31,7 @@ import type { VideoNodeProps } from '.';
 import { ModelSelector } from '../model-selector';
 import { VideoAspectRatioSelector } from './video-aspect-ratio-selector';
 import { VideoDurationSelector } from './video-duration-selector';
+import { CfgScaleSlider } from './cfg-scale-slider';
 
 type VideoTransformProps = VideoNodeProps & {
   title: string;
@@ -74,6 +75,7 @@ export const VideoTransform = ({
   const [localInstructions, setLocalInstructions] = useState(
     data.instructions ?? ''
   );
+  const [videoLoading, setVideoLoading] = useState(false);
   const project = useProject();
   const analytics = useAnalytics();
 
@@ -81,6 +83,10 @@ export const VideoTransform = ({
   const selectedModel = videoModels[modelId];
   const duration = data.duration ?? selectedModel?.durations?.at(0) ?? 5;
   const aspectRatio = data.aspectRatio ?? selectedModel?.aspectRatios?.at(0) ?? '16:9';
+  const cfgScale = data.cfgScale ?? 0.5;
+
+  // Verificar se é modelo Kling (KIE)
+  const isKlingModel = modelId.includes('kling');
 
   const handleInstructionsChange: ChangeEventHandler<HTMLTextAreaElement> =
     useCallback(
@@ -95,6 +101,13 @@ export const VideoTransform = ({
       updateNodeData(id, { instructions: localInstructions });
     }
   }, [localInstructions, data.instructions, id, updateNodeData]);
+
+  const handleCfgScaleChange = useCallback(
+    (value: number) => {
+      updateNodeData(id, { cfgScale: value });
+    },
+    [id, updateNodeData]
+  );
 
   // Sync local state with external changes (only when data.instructions changes)
   useEffect(() => {
@@ -226,9 +239,51 @@ export const VideoTransform = ({
     let shouldClearLoading = true;
 
     try {
-      const incomers = getIncomers({ id }, getNodes(), getEdges());
-      const textPrompts = getTextFromTextNodes(incomers);
-      const images = getImagesFromImageNodes(incomers);
+      const allIncomers = getIncomers({ id }, getNodes(), getEdges());
+      const edges = getEdges();
+
+      // Separar incomers por handle
+      // IMPORTANTE: Edges sem targetHandle explícito vão para 'prompt' por padrão
+      const promptIncomers = allIncomers.filter((node) => {
+        const edge = edges.find(
+          (e) => e.target === id &&
+            e.source === node.id &&
+            (e.targetHandle === 'prompt' || e.targetHandle === null || e.targetHandle === undefined)
+        );
+        return !!edge;
+      });
+
+      const negativePromptIncomers = allIncomers.filter((node) => {
+        const edge = edges.find(
+          (e) => e.target === id &&
+            e.source === node.id &&
+            e.targetHandle === 'negative-prompt'
+        );
+        return !!edge;
+      });
+
+      const textPrompts = getTextFromTextNodes(promptIncomers);
+      const images = getImagesFromImageNodes(promptIncomers);
+      const negativePromptTexts = getTextFromTextNodes(negativePromptIncomers);
+
+      // 🔍 DEBUG: Log de conexões
+      const targetEdges = edges.filter(e => e.target === id);
+      console.log('🔌 [Video Transform] Conexões detectadas:', {
+        totalIncomers: allIncomers.length,
+        promptIncomers: promptIncomers.length,
+        negativePromptIncomers: negativePromptIncomers.length,
+        allEdges: targetEdges.map(e => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+          type: e.type,
+        })),
+        textPrompts: textPrompts.length,
+        images: images.length,
+        negativePromptTexts: negativePromptTexts.length,
+      });
 
       if (!textPrompts.length && !images.length) {
         throw new Error('No prompts found');
@@ -244,12 +299,27 @@ export const VideoTransform = ({
         imageCount: images.length,
       });
 
+      // Usar negative prompt dos nós conectados, ou do campo local se não houver conexão
+      const finalNegativePrompt = negativePromptTexts.length > 0
+        ? negativePromptTexts.join('\n')
+        : data.negativePrompt;
+
+      // 🔍 DEBUG: Log do negative prompt final
+      console.log('📝 [Video Transform] Negative Prompt:', {
+        fromConnectedNodes: negativePromptTexts.length > 0,
+        negativePromptTexts,
+        finalNegativePrompt,
+        hasNegativeConnection: negativePromptIncomers.length > 0,
+      });
+
       const response = await generateVideoAction({
         modelId,
         prompt: [data.instructions ?? '', ...textPrompts].join('\n'),
         images: images.slice(0, 1),
         duration,
         aspectRatio,
+        negativePrompt: finalNegativePrompt,
+        cfgScale: data.cfgScale,
         nodeId: id,
         projectId: project.id,
       });
@@ -334,6 +404,8 @@ export const VideoTransform = ({
     type,
     modelId,
     data.instructions,
+    data.negativePrompt,
+    data.cfgScale,
     duration,
     aspectRatio,
     updateNodeData
@@ -378,15 +450,34 @@ export const VideoTransform = ({
     }
 
     // Add aspect ratio selector if model has aspect ratio options
-    if (selectedModel?.aspectRatios?.length) {
+    // Ocultar para Kling image-to-video (quando há imagens conectadas)
+    const allIncomers = getIncomers({ id }, getNodes(), getEdges());
+    const hasImages = getImagesFromImageNodes(allIncomers).length > 0;
+    const shouldShowAspectRatio = selectedModel?.aspectRatios?.length && !(isKlingModel && hasImages);
+
+    if (shouldShowAspectRatio) {
       items.push({
         children: (
           <VideoAspectRatioSelector
             value={aspectRatio}
-            options={selectedModel.aspectRatios}
+            options={selectedModel.aspectRatios || []}
             id={`${id}-aspect-ratio`}
             className="w-[120px] rounded-full"
             onChange={handleAspectRatioChange}
+          />
+        ),
+      });
+    }
+
+    // Add cfg_scale slider for Kling models
+    if (isKlingModel) {
+      items.push({
+        children: (
+          <CfgScaleSlider
+            value={cfgScale}
+            id={`${id}-cfg-scale`}
+            className="w-[200px]"
+            onChange={handleCfgScaleChange}
           />
         ),
       });
@@ -462,9 +553,12 @@ export const VideoTransform = ({
     handleModelChange,
     handleDurationChange,
     handleAspectRatioChange,
+    handleCfgScaleChange,
     selectedModel,
     duration,
     aspectRatio,
+    cfgScale,
+    isKlingModel,
     loading,
     data.generated?.url,
     data.updatedAt,
@@ -473,50 +567,127 @@ export const VideoTransform = ({
   ]);
 
   return (
-    <NodeLayout id={id} data={data} type={type} title={title} toolbar={toolbar}>
-      {loading && (
-        <Skeleton className="flex aspect-video w-full animate-pulse items-center justify-center rounded-b-xl">
-          <Loader2Icon
-            size={16}
-            className="size-4 animate-spin text-muted-foreground"
-          />
-        </Skeleton>
-      )}
-      {!loading && !data.generated?.url && (
-        <div className="flex aspect-video w-full items-center justify-center rounded-b-xl bg-secondary">
-          <p className="text-muted-foreground text-sm">
-            Press <PlayIcon size={12} className="-translate-y-px inline" /> to
-            generate video
-          </p>
-        </div>
-      )}
-      {data.generated?.url && !loading && (
-        <video
-          src={data.generated.url}
-          width={data.width ?? 800}
-          height={data.height ?? 450}
-          muted
-          loop
-          playsInline
-          onMouseEnter={(e) => e.currentTarget.play()}
-          onMouseLeave={(e) => {
-            e.currentTarget.pause();
-            e.currentTarget.currentTime = 0;
-          }}
-          className="w-full rounded-b-xl object-cover cursor-pointer"
-        />
-      )}
-      <Textarea
-        value={localInstructions}
-        onChange={handleInstructionsChange}
-        onInput={handleInstructionsChange}
-        onBlur={handleInstructionsBlur}
-        onKeyDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
-        placeholder="Enter instructions"
-        className="shrink-0 resize-none rounded-none border-none bg-transparent! shadow-none focus-visible:ring-0"
+    <>
+      {/* Handle principal para prompt e imagens */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="prompt"
+        isConnectable={true}
+        style={{
+          top: '30%',
+          left: 0,
+          width: '12px',
+          height: '12px',
+          border: '2px solid var(--border)',
+          zIndex: 10,
+          transform: 'translateX(-50%)',
+        }}
       />
-    </NodeLayout>
+      <div
+        className="absolute left-0 text-xs text-muted-foreground whitespace-nowrap pointer-events-none bg-background/80 px-1 rounded z-50"
+        style={{ top: '30%', transform: 'translateX(-100%) translateX(-8px) translateY(-50%)' }}
+      >
+        Prompt
+      </div>
+
+      {/* Handle para negative prompt (apenas para Kling) */}
+      {isKlingModel && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="negative-prompt"
+            isConnectable={true}
+            style={{
+              top: '70%',
+              left: 0,
+              background: '#ef4444',
+              width: '12px',
+              height: '12px',
+              border: '2px solid #dc2626',
+              zIndex: 10,
+              transform: 'translateX(-50%)',
+            }}
+          />
+          <div
+            className="absolute left-0 text-xs text-red-500 whitespace-nowrap pointer-events-none bg-background/80 px-1 rounded font-medium z-50"
+            style={{ top: '70%', transform: 'translateX(-100%) translateX(-8px) translateY(-50%)' }}
+          >
+            Negative
+          </div>
+        </>
+      )}
+
+      <NodeLayout
+        id={id}
+        data={data}
+        type={type}
+        title={title}
+        toolbar={toolbar}
+        disableDefaultHandle={true}
+      >
+        {loading && (
+          <Skeleton className="flex aspect-video w-full animate-pulse items-center justify-center rounded-b-xl">
+            <Loader2Icon
+              size={16}
+              className="size-4 animate-spin text-muted-foreground"
+            />
+          </Skeleton>
+        )}
+        {!loading && !data.generated?.url && (
+          <div className="flex aspect-video w-full items-center justify-center rounded-b-xl bg-secondary">
+            <p className="text-muted-foreground text-sm">
+              Press <PlayIcon size={12} className="-translate-y-px inline" /> to
+              generate video
+            </p>
+          </div>
+        )}
+        {data.generated?.url && !loading && (
+          <div className="relative w-full aspect-video">
+            {videoLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-b-xl z-10">
+                <Loader2Icon
+                  size={24}
+                  className="animate-spin text-white"
+                />
+              </div>
+            )}
+            <video
+              src={data.generated.url}
+              width={data.width ?? 800}
+              height={data.height ?? 450}
+              muted
+              loop
+              playsInline
+              onLoadStart={() => setVideoLoading(true)}
+              onCanPlay={() => setVideoLoading(false)}
+              onError={() => setVideoLoading(false)}
+              onMouseEnter={(e) => {
+                setVideoLoading(true);
+                e.currentTarget.play();
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.pause();
+                e.currentTarget.currentTime = 0;
+                setVideoLoading(false);
+              }}
+              className="w-full rounded-b-xl object-cover cursor-pointer"
+            />
+          </div>
+        )}
+        <Textarea
+          value={localInstructions}
+          onChange={handleInstructionsChange}
+          onInput={handleInstructionsChange}
+          onBlur={handleInstructionsBlur}
+          onKeyDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          placeholder="Enter instructions"
+          className="shrink-0 resize-none rounded-none border-none bg-transparent! shadow-none focus-visible:ring-0"
+        />
+      </NodeLayout>
+    </>
   );
 };

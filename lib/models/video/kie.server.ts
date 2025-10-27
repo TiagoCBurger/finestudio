@@ -9,7 +9,9 @@ import type { VideoModel } from '@/lib/models/video';
 import { currentUser } from '@/lib/auth';
 import { createFalJob } from '@/lib/fal-jobs';
 
-type KieVideoModel = 'kling/v2-5-turbo-image-to-video-pro';
+type KieVideoModel =
+    | 'kling/v2-5-turbo-image-to-video-pro'
+    | 'kling/v2-5-turbo-text-to-video-pro';
 
 /**
  * KIE API Response
@@ -23,9 +25,9 @@ interface KieApiResponse {
 }
 
 /**
- * KIE API Input
+ * KIE API Input for image-to-video
  */
-interface KieVideoInput {
+interface KieImageToVideoInput {
     prompt: string;
     image_url: string;
     duration?: string;
@@ -33,60 +35,102 @@ interface KieVideoInput {
     cfg_scale?: number;
 }
 
-export const kieServer = (modelId: KieVideoModel): VideoModel => ({
-    modelId,
-    generate: async ({ prompt, imagePrompt, duration, aspectRatio, _metadata }) => {
-        // Validação: imagem é obrigatória para este modelo
-        if (!imagePrompt) {
+/**
+ * KIE API Input for text-to-video
+ */
+interface KieTextToVideoInput {
+    prompt: string;
+    duration?: string;
+    aspect_ratio?: string;
+    negative_prompt?: string;
+    cfg_scale?: number;
+}
+
+type KieVideoInput = KieImageToVideoInput | KieTextToVideoInput;
+
+export const kieServer = (
+    imageToVideoModelId: KieVideoModel,
+    textToVideoModelId?: KieVideoModel
+): VideoModel => ({
+    modelId: imageToVideoModelId,
+    textToVideoModelId,
+    generate: async ({ prompt, imagePrompt, duration, aspectRatio, _metadata, negativePrompt, cfgScale }) => {
+        // Escolher o endpoint correto baseado na presença de imagem
+        const modelId = imagePrompt
+            ? imageToVideoModelId  // Se tem imagem, usa image-to-video
+            : textToVideoModelId || imageToVideoModelId;  // Se não tem imagem, usa text-to-video (se disponível)
+
+        // Validação: se não tem textToVideoModelId, imagem é obrigatória
+        if (!imagePrompt && !textToVideoModelId) {
             throw new Error(`${modelId} requires an image input (image-to-video)`);
         }
 
         console.log('🎬 KIE.ai video generation:', {
             modelId,
             hasImage: !!imagePrompt,
-            imageUrl: imagePrompt,
-            imageUrlLength: imagePrompt?.length,
+            mode: imagePrompt ? 'image-to-video' : 'text-to-video',
+            imageUrl: imagePrompt?.substring(0, 100),
             duration,
             aspectRatio,
+            negativePrompt,
+            cfgScale,
         });
 
-        // Validar formato básico da URL
-        if (!imagePrompt.startsWith('http://') && !imagePrompt.startsWith('https://')) {
-            throw new Error(`Invalid image URL format: must start with http:// or https://`);
-        }
-
-        // Log detalhado da URL para debug
-        const urlParts = new URL(imagePrompt);
-        const hasValidExtension = /\.(jpg|jpeg|png|webp)$/i.test(urlParts.pathname);
-
-        console.log('🔍 Image URL analysis:', {
-            protocol: urlParts.protocol,
-            hostname: urlParts.hostname,
-            pathname: urlParts.pathname,
-            hasExtension: hasValidExtension,
-            fullUrl: imagePrompt,
-        });
-
-        if (!hasValidExtension) {
-            console.warn('⚠️ WARNING: Image URL does not have a visible file extension (.jpg, .png, .webp)');
-            console.warn('⚠️ This may cause "image_url file type not supported" error from KIE API');
-            console.warn('⚠️ URL:', imagePrompt);
-        }
-
-        // Preparar input para API KIE (seguindo exatamente a documentação)
-        const input: KieVideoInput = {
+        // Preparar input base para API KIE
+        const baseInput = {
             prompt,
-            image_url: imagePrompt,
             duration: duration.toString(), // "5" ou "10"
-            negative_prompt: 'blur, distort, and low quality',
-            cfg_scale: 0.5,
+            negative_prompt: negativePrompt || 'blur, distort, and low quality',
+            cfg_scale: cfgScale !== undefined ? cfgScale : 0.5,
         };
+
+        let input: KieVideoInput;
+
+        // Adicionar image_url apenas se houver imagem válida (image-to-video)
+        if (imagePrompt && typeof imagePrompt === 'string' && imagePrompt.trim() !== '') {
+            // Validar formato básico da URL
+            if (!imagePrompt.startsWith('http://') && !imagePrompt.startsWith('https://')) {
+                throw new Error(`Invalid image URL format: must start with http:// or https://`);
+            }
+
+            // Log detalhado da URL para debug
+            const urlParts = new URL(imagePrompt);
+            const hasValidExtension = /\.(jpg|jpeg|png|webp)$/i.test(urlParts.pathname);
+
+            console.log('🔍 Image URL analysis:', {
+                protocol: urlParts.protocol,
+                hostname: urlParts.hostname,
+                pathname: urlParts.pathname,
+                hasExtension: hasValidExtension,
+                fullUrl: imagePrompt,
+            });
+
+            if (!hasValidExtension) {
+                console.warn('⚠️ WARNING: Image URL does not have a visible file extension (.jpg, .png, .webp)');
+                console.warn('⚠️ This may cause "image_url file type not supported" error from KIE API');
+                console.warn('⚠️ URL:', imagePrompt);
+            }
+
+            input = {
+                ...baseInput,
+                image_url: imagePrompt,
+            } as KieImageToVideoInput;
+
+            console.log('✅ Image URL added to input (image-to-video mode)');
+        } else {
+            // Text-to-video mode (sem image_url, mas com aspect_ratio)
+            input = {
+                ...baseInput,
+                aspect_ratio: aspectRatio || '16:9',
+            } as KieTextToVideoInput;
+            console.log('ℹ️ No image URL provided, using text-to-video mode with aspect_ratio:', aspectRatio);
+        }
 
         console.log('📤 KIE.ai video request:', {
             modelId,
             inputKeys: Object.keys(input),
             duration: input.duration,
-            imageUrl: input.image_url,
+            imageUrl: 'image_url' in input ? input.image_url : undefined,
             prompt: input.prompt.substring(0, 100),
         });
 

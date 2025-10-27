@@ -73,7 +73,10 @@ export const videoModelsServer: Record<string, TersaVideoModel> = {
         providers: [
             {
                 ...providers.kie,
-                model: kieServer('kling/v2-5-turbo-image-to-video-pro'),
+                model: kieServer(
+                    'kling/v2-5-turbo-image-to-video-pro',
+                    'kling/v2-5-turbo-text-to-video-pro'
+                ),
 
                 // KIE pricing for Kling v2.5 Turbo Pro
                 getCost: ({ duration }) => {

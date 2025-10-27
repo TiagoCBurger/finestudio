@@ -34,6 +34,7 @@ type NodeLayoutProps = {
     children: ReactNode;
   }[];
   className?: string;
+  disableDefaultHandle?: boolean;
 };
 
 export const NodeLayout = ({
@@ -44,6 +45,7 @@ export const NodeLayout = ({
   toolbar,
   title,
   className,
+  disableDefaultHandle = false,
 }: NodeLayoutProps) => {
   const { deleteElements, setCenter, getNode, updateNode } = useReactFlow();
   const { duplicateNode } = useNodeOperations();
@@ -100,7 +102,7 @@ export const NodeLayout = ({
       {type !== 'drop' && Boolean(toolbar?.length) && (
         <NodeToolbar id={id} items={toolbar} />
       )}
-      {type !== 'file' && type !== 'tweet' && (
+      {!disableDefaultHandle && type !== 'file' && type !== 'tweet' && (
         <Handle type="target" position={Position.Left} />
       )}
       <ContextMenu onOpenChange={handleSelect}>

@@ -16,6 +16,8 @@ export type VideoNodeProps = {
     updatedAt?: string;
     model?: string;
     instructions?: string;
+    negativePrompt?: string;
+    cfgScale?: number;
     duration?: number;
     aspectRatio?: string;
     width?: number;

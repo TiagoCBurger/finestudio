@@ -45,6 +45,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from './ui/context-menu';
+import { toast } from 'sonner';
 
 export const Canvas = ({ children, ...props }: ReactFlowProps) => {
   const project = useProject();
@@ -325,6 +326,14 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
 
   const handleConnect = useCallback<OnConnect>(
     (connection) => {
+      // DEBUG: Log da conexão
+      console.log('🔗 [Canvas] handleConnect:', {
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
+      });
+
       const newEdge: Edge = {
         id: nanoid(),
         type: 'animated',
@@ -507,86 +516,176 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
   const handleCopy = useCallback(() => {
     const selectedNodes = getNodes().filter((node) => node.selected);
     if (selectedNodes.length > 0) {
+      console.log('📋 Copying nodes:', {
+        count: selectedNodes.length,
+        nodes: selectedNodes.map(n => ({
+          id: n.id,
+          type: n.type,
+          hasData: !!n.data,
+          dataKeys: n.data ? Object.keys(n.data) : [],
+          state: (n.data as any)?.state,
+          generated: (n.data as any)?.generated,
+        }))
+      });
       setCopiedNodes(selectedNodes);
+      toast.success(`Copied ${selectedNodes.length} node(s)`);
     }
   }, [getNodes]);
 
-  const handlePaste = useCallback(() => {
-    if (copiedNodes.length === 0) {
+  const handlePaste = useCallback(async (event?: ClipboardEvent | globalThis.ClipboardEvent) => {
+    // First, try to paste copied nodes
+    if (copiedNodes.length > 0) {
+      console.log('📌 Pasting nodes:', {
+        count: copiedNodes.length,
+        copiedNodes: copiedNodes.map(n => ({
+          id: n.id,
+          type: n.type,
+          hasData: !!n.data,
+          dataKeys: n.data ? Object.keys(n.data) : [],
+          state: (n.data as any)?.state,
+          generated: (n.data as any)?.generated,
+        }))
+      });
+
+      const newNodes = copiedNodes.map((node) => {
+        // Deep clone the node data to preserve all properties (images, videos, etc.)
+        const clonedData = node.data ? JSON.parse(JSON.stringify(node.data)) : {};
+
+        console.log('🔄 Cloning node:', {
+          originalId: node.id,
+          type: node.type,
+          originalData: node.data,
+          clonedData,
+        });
+
+        return {
+          ...node,
+          id: nanoid(),
+          data: clonedData,
+          position: {
+            x: node.position.x + 200,
+            y: node.position.y + 200,
+          },
+          selected: true,
+        };
+      });
+
+      console.log('✅ New nodes created:', {
+        count: newNodes.length,
+        nodes: newNodes.map(n => ({
+          id: n.id,
+          type: n.type,
+          hasData: !!n.data,
+          dataKeys: n.data ? Object.keys(n.data) : [],
+          state: (n.data as any)?.state,
+          generated: (n.data as any)?.generated,
+        }))
+      });
+
+      // Unselect all existing nodes
+      setNodes((nodes: Node[]) =>
+        nodes.map((node: Node) => ({
+          ...node,
+          selected: false,
+        }))
+      );
+
+      // Add new nodes
+      setNodes((nodes: Node[]) => [...nodes, ...newNodes]);
+      save();
+      toast.success(`Pasted ${newNodes.length} node(s)`);
       return;
     }
 
-    const newNodes = copiedNodes.map((node) => ({
-      ...node,
-      id: nanoid(),
-      position: {
-        x: node.position.x + 200,
-        y: node.position.y + 200,
-      },
-      selected: true,
-    }));
+    // If no nodes copied, try to paste an image from clipboard
+    console.log('🖼️ Checking for image in clipboard:', {
+      hasEvent: !!event,
+      hasProjectId: !!project?.id,
+      hasClipboardData: !!event?.clipboardData,
+      itemsCount: event?.clipboardData?.items?.length,
+    });
 
-    // Unselect all existing nodes
-    setNodes((nodes: Node[]) =>
-      nodes.map((node: Node) => ({
-        ...node,
-        selected: false,
-      }))
-    );
-
-    // Add new nodes
-    setNodes((nodes: Node[]) => [...nodes, ...newNodes]);
-  }, [copiedNodes]);
-
-  const handleImagePaste = useCallback(
-    async (event: ClipboardEvent) => {
-      if (!project?.id) {
-        return;
-      }
-
+    if (event && project?.id) {
       const items = event.clipboardData?.items;
       if (!items) {
+        console.log('❌ No clipboard items found');
         return;
       }
+
+      console.log('📋 Clipboard items:', {
+        count: items.length,
+        types: Array.from(items).map(item => ({
+          type: item.type,
+          kind: item.kind,
+        }))
+      });
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
+
+        console.log(`📄 Checking item ${i}:`, {
+          type: item.type,
+          kind: item.kind,
+          isImage: item.type.indexOf('image') !== -1,
+        });
 
         if (item.type.indexOf('image') !== -1) {
           event.preventDefault();
 
           const file = item.getAsFile();
+          console.log('📁 Got file from clipboard:', {
+            hasFile: !!file,
+            fileName: file?.name,
+            fileSize: file?.size,
+            fileType: file?.type,
+          });
+
           if (!file) {
+            console.log('❌ No file extracted from clipboard item');
             continue;
           }
 
           try {
-            // Create node first
+            console.log('⬆️ Starting image upload...');
+            toast.info('Uploading image...');
+
+            // Create node first with loading state
             const nodeId = nanoid();
             const newNode: Node = {
               id: nodeId,
               type: 'image',
-              data: {},
-              position: screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
+              data: {
+                state: {
+                  status: 'loading_image',
+                }
+              },
+              position: screenToFlowPosition({
+                x: window.innerWidth / 2,
+                y: window.innerHeight / 2
+              }),
               origin: [0, 0.5],
             };
 
             setNodes((nds: Node[]) => nds.concat(newNode));
+            console.log('✅ Created loading node:', nodeId);
 
             // Upload the image
             const { url, type } = await uploadFile(file, 'files');
+            console.log('✅ Upload complete:', { url, type });
 
-            // Update node with uploaded image
+            // Update node with uploaded image in ready state
             updateNode(nodeId, {
               data: {
-                content: {
+                state: {
+                  status: 'ready',
                   url,
-                  type,
-                },
+                  timestamp: Date.now(),
+                }
               },
             });
 
             save();
+            toast.success('Image pasted successfully');
 
             analytics.track('canvas', 'image', 'pasted', {
               type,
@@ -598,9 +697,10 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
           break;
         }
       }
-    },
-    [project?.id, screenToFlowPosition, updateNode, save, analytics]
-  );
+    }
+  }, [copiedNodes, save, project?.id, screenToFlowPosition, updateNode, analytics]);
+
+
 
   const handleDuplicateAll = useCallback(() => {
     const selected = getNodes().filter((node) => node.selected);
@@ -634,15 +734,15 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
     preventDefault: true,
   });
 
-  useHotkeys('meta+v', handlePaste, {
+  useHotkeys('meta+v', () => handlePaste(), {
     enableOnContentEditable: false,
     preventDefault: true,
   });
 
-  // Handle paste event for images
+  // Handle paste event for both nodes and images
   useEffect(() => {
-    const handlePasteEvent = (event: any) => {
-      handleImagePaste(event);
+    const handlePasteEvent = (event: globalThis.ClipboardEvent) => {
+      handlePaste(event);
     };
 
     document.addEventListener('paste', handlePasteEvent);
@@ -650,7 +750,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
     return () => {
       document.removeEventListener('paste', handlePasteEvent);
     };
-  }, [handleImagePaste]);
+  }, [handlePaste]);
 
   return (
     <NodeOperationsProvider addNode={addNode} duplicateNode={duplicateNode}>
@@ -661,7 +761,14 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
               deleteKeyCode={['Backspace', 'Delete']}
               nodes={nodes}
               onNodesChange={handleNodesChange}
-              edges={edges}
+              edges={edges.map((edge) => ({
+                ...edge,
+                // Aplicar estilo vermelho para edges conectadas ao handle negative-prompt
+                style: edge.targetHandle === 'negative-prompt'
+                  ? { stroke: '#ef4444', strokeWidth: 2 }
+                  : edge.style,
+                animated: edge.targetHandle === 'negative-prompt',
+              }))}
               onEdgesChange={handleEdgesChange}
               onConnectStart={handleConnectStart}
               onConnect={handleConnect}

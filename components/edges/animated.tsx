@@ -25,22 +25,6 @@ const getHandleCoordsByPosition = (
     handle = node.internals.handleBounds?.[handleType]?.find(
       (h) => h.id === handleId && h.position === handlePosition
     );
-
-    // DEBUG: Log se encontrou o handle
-    if (handle) {
-      console.log('✅ [getHandleCoords] Found handle:', {
-        handleId,
-        handleType,
-        x: handle.x,
-        y: handle.y,
-      });
-    } else {
-      console.warn('⚠️ [getHandleCoords] Handle NOT found:', {
-        handleId,
-        handleType,
-        availableHandles: node.internals.handleBounds?.[handleType]?.map(h => h.id),
-      });
-    }
   }
 
   // Fallback: pegar o primeiro handle na posição
@@ -116,20 +100,6 @@ export const AnimatedEdge = (props: EdgeProps) => {
   if (!sourceNode || !targetNode) {
     return null;
   }
-
-  // DEBUG: Log para verificar handles
-  console.log('🔍 [AnimatedEdge] Edge:', {
-    id,
-    sourceHandle,
-    targetHandle,
-    targetNodeId: target,
-    availableTargetHandles: targetNode.internals.handleBounds?.target?.map(h => ({
-      id: h.id,
-      x: h.x,
-      y: h.y,
-      position: h.position,
-    })),
-  });
 
   const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(
     sourceNode,

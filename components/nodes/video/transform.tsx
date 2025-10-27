@@ -568,7 +568,7 @@ export const VideoTransform = ({
 
   return (
     <>
-      {/* Handle principal para prompt e imagens */}
+      {/* Handles DEVEM estar fora do NodeLayout para o ReactFlow detectá-los */}
       <Handle
         type="target"
         position={Position.Left}
@@ -591,7 +591,6 @@ export const VideoTransform = ({
         Prompt
       </div>
 
-      {/* Handle para negative prompt (apenas para Kling) */}
       {isKlingModel && (
         <>
           <Handle

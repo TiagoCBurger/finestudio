@@ -326,14 +326,6 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
 
   const handleConnect = useCallback<OnConnect>(
     (connection) => {
-      // DEBUG: Log da conexão
-      console.log('🔗 [Canvas] handleConnect:', {
-        source: connection.source,
-        target: connection.target,
-        sourceHandle: connection.sourceHandle,
-        targetHandle: connection.targetHandle,
-      });
-
       const newEdge: Edge = {
         id: nanoid(),
         type: 'animated',

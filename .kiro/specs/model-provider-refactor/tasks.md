@@ -15,6 +15,14 @@
     - Add logging to track which system is being used
     - _Requirements: ALL (safety requirement)_
 
+  - [ ] 0.3 Study and document existing working patterns
+    - Analyze current KIE nano-banana implementation (lib/models/image/kie.server.ts)
+    - Document OpenRouter text model integration patterns
+    - Map existing webhook handling and state management flows
+    - Create compatibility matrix showing what must be preserved
+    - Document exact API contracts and response formats
+    - _Requirements: ALL (compatibility requirement)_
+
 - [ ] 1. Simplify model configurations to essential models only
   - [ ] 1.1 Update image models to only include nano-banana models
     - Keep only `google/nano-banana` for text-to-image generation
@@ -93,17 +101,22 @@
     - _Requirements: 6.1, 6.2, 6.4, 6.5_
 
 - [ ] 5. Refactor existing providers to use new architecture
-  - [ ] 5.1 Refactor KIE provider implementation
-    - Update KieImageProvider to extend new ProviderBase class
-    - Migrate existing KIE-specific logic to new architecture
-    - Implement KIE-specific API integration using new interfaces
-    - Update webhook handling to use unified system
+  - [ ] 5.1 Refactor KIE provider implementation (PRESERVE EXISTING BEHAVIOR)
+    - Create new KieImageProvider that extends ProviderBase class
+    - CRITICAL: Maintain exact same API behavior as current lib/models/image/kie.server.ts
+    - Preserve existing webhook URL generation and handling logic
+    - Keep same error handling and response normalization patterns
+    - Ensure nano-banana and nano-banana-edit models work identically
+    - Run side-by-side comparison tests with old implementation
     - _Requirements: 1.1, 1.5, 3.1, 3.2, 5.2, 5.5_
 
-  - [ ] 5.2 Refactor OpenRouter provider implementation
-    - Update OpenRouter provider to use new base architecture
-    - Implement text model generation using unified interfaces
-    - Add proper error handling and response normalization
+  - [ ] 5.2 Refactor OpenRouter provider implementation (PRESERVE EXISTING BEHAVIOR)
+    - Create new OpenRouterProvider that extends ProviderBase class
+    - CRITICAL: Maintain exact same behavior as current OpenRouter integration
+    - Preserve existing API call patterns and authentication
+    - Keep same response parsing and error handling logic
+    - Ensure google/gemini-2.5-pro model works identically
+    - Test compatibility with existing text node components
     - _Requirements: 1.1, 1.5, 3.1, 3.2, 5.2_
 
 - [ ] 6. Implement unified webhook handler
@@ -177,88 +190,103 @@
     - Allow instant rollback to old system if issues occur
     - _Requirements: 1.1, 1.2_
 
-- [ ]* 10. Create comprehensive test suite
-  - [ ]* 10.1 Write unit tests for core components
+- [ ] 10. Create compatibility validation system
+  - [ ] 10.1 Create behavioral comparison tests
+    - Build automated tests that compare old vs new system outputs
+    - Test identical inputs produce identical results
+    - Validate response timing and error handling matches
+    - Create regression detection for any behavioral changes
+    - _Requirements: ALL (compatibility requirement)_
+
+  - [ ] 10.2 Implement continuous compatibility monitoring
+    - Create test suite that runs both systems in parallel
+    - Log any differences in behavior or performance
+    - Set up alerts for compatibility breaks
+    - Ensure 100% behavioral compatibility before any rollout
+    - _Requirements: ALL (compatibility requirement)_
+
+- [ ]* 11. Create comprehensive test suite
+  - [ ]* 11.1 Write unit tests for core components
     - Create tests for ModelRegistry functionality
     - Write tests for ProviderFactory and ProviderBase classes
     - Add tests for error handling and retry logic
     - _Requirements: 1.1, 1.4, 6.1, 6.2_
 
-  - [ ]* 10.2 Write integration tests
+  - [ ]* 11.2 Write integration tests
     - Create end-to-end tests for generation workflows
     - Write tests for webhook processing and state updates
     - Add tests for provider compatibility and error scenarios
     - _Requirements: 3.1, 3.2, 3.3, 5.5_
 
-  - [ ]* 10.3 Write provider-specific tests
+  - [ ]* 11.3 Write provider-specific tests
     - Create tests for each provider implementation
     - Write tests for model configuration validation
     - Add tests for node component integration
     - _Requirements: 1.5, 4.1, 4.2, 4.3_
 
-- [ ] 11. Update file organization and documentation
-  - [ ] 11.1 Reorganize provider code structure
+- [ ] 12. Update file organization and documentation
+  - [ ] 12.1 Reorganize provider code structure
     - Create consistent directory structure for all providers
     - Separate client and server implementations properly
     - Centralize shared types and interfaces
     - _Requirements: 7.1, 7.2, 7.3, 5.1, 5.3_
 
-  - [ ] 11.2 Update environment configuration
+  - [ ] 12.2 Update environment configuration
     - Consolidate environment variable handling
     - Add validation for required configuration
     - Update configuration documentation
     - _Requirements: 5.1, 5.4_
 
-  - [ ]* 11.3 Create provider documentation
+  - [ ]* 12.3 Create provider documentation
     - Document new provider architecture and patterns
     - Create migration guide for existing code
     - Add examples for adding new providers and models
     - _Requirements: 7.5_
 
-- [ ] 12. Deploy and validate new system (SAFE DEPLOYMENT)
-  - [ ] 12.1 Deploy with new system completely disabled
+- [ ] 13. Deploy and validate new system (SAFE DEPLOYMENT)
+  - [ ] 13.1 Deploy with new system completely disabled
     - Deploy all new code with ENABLE_UNIFIED_PROVIDERS=false
     - Verify nano-banana and OpenRouter work exactly as before
     - Run comprehensive tests on existing functionality
     - Monitor for any regressions (should be zero)
     - _Requirements: 1.1, 1.2_
 
-  - [ ] 12.2 Enable new system for single test model only
+  - [ ] 13.2 Enable new system for single test model only
     - Create test environment with ENABLE_UNIFIED_PROVIDERS=true
     - Test with only one model (e.g., nano-banana) in controlled environment
     - Compare results between old and new systems
     - Ensure 100% compatibility before proceeding
     - _Requirements: 1.1, 1.2_
 
-  - [ ] 12.3 Gradual rollout with instant rollback capability
+  - [ ] 13.3 Gradual rollout with instant rollback capability
     - Enable for internal testing only (specific user IDs)
     - Monitor error rates and performance metrics
     - Keep old system as primary, new system as secondary
     - Implement instant rollback mechanism if issues detected
     - _Requirements: 1.1, 1.2_
 
-  - [ ] 12.4 Optional: Full migration (only after extensive validation)
+  - [ ] 13.4 Optional: Full migration (only after extensive validation)
     - Only proceed if new system proves 100% reliable
     - Maintain old system code for at least 30 days after migration
     - Keep rollback capability available
     - _Requirements: 1.1, 1.2, 7.1, 7.2, 7.3_
 
-- [ ] 13. Create comprehensive developer documentation
-  - [ ] 13.1 Create provider implementation guide
+- [ ] 14. Create comprehensive developer documentation
+  - [ ] 14.1 Create provider implementation guide
     - Document step-by-step process for adding new providers
     - Include code examples for extending ProviderBase class
     - Document webhook integration patterns and requirements
     - Provide templates for common provider types
     - _Requirements: 7.5_
 
-  - [ ] 13.2 Create model registration guide
+  - [ ] 14.2 Create model registration guide
     - Document how to register new models in ModelRegistry
     - Explain model capability definitions and compatibility rules
     - Provide examples for different model types (text-to-image, image-to-image, text)
     - Document pricing configuration and parameter handling
     - _Requirements: 4.1, 4.2, 7.5_
 
-  - [ ] 13.3 Create integration examples and best practices
+  - [ ] 14.3 Create integration examples and best practices
     - Provide complete working examples for common scenarios
     - Document testing strategies for new providers and models
     - Include troubleshooting guide for common integration issues

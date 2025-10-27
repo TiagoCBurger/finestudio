@@ -105,18 +105,14 @@ export const generateVideoAction = async ({
 
     const provider = model.providers[0];
 
-    let firstFrameImage = images.at(0)?.url;
+    const firstFrameImage = images.at(0)?.url;
 
-    if (firstFrameImage && process.env.NODE_ENV !== 'production') {
-      const response = await fetch(firstFrameImage);
-      const blob = await response.blob();
-      const uint8Array = new Uint8Array(await blob.arrayBuffer());
-      const base64 = Buffer.from(uint8Array).toString('base64');
-
-      firstFrameImage = `data:${images.at(0)?.type};base64,${base64}`;
-    }
-
-    console.log('[Video Generation] Image prompt:', firstFrameImage ? 'Present' : 'None');
+    console.log('[Video Generation] Image prompt:', {
+      present: !!firstFrameImage,
+      url: firstFrameImage?.substring(0, 100),
+      isDataUri: firstFrameImage?.startsWith('data:'),
+      isHttpUrl: firstFrameImage?.startsWith('http'),
+    });
 
     const url = await provider.model.generate({
       prompt,

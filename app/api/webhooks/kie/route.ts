@@ -1,12 +1,17 @@
 /**
  * Webhook handler para KIE.ai (Refatorado)
- * Processa callbacks da API KIE.ai usando handler unificado
+ * Processa callbacks da API KIE.ai para imagens e vídeos
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { parseError } from '@/lib/error/parse';
 import { processImageWebhook } from '@/lib/webhooks/image-webhook-handler';
 import type { WebhookPayload } from '@/lib/models/image/types';
+import { database } from '@/lib/database';
+import { falJobs, projects } from '@/schema';
+import { eq } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
+import { getStorageProvider } from '@/lib/storage/factory';
 
 /**
  * Payload do webhook KIE.ai (formato bruto)
@@ -169,6 +174,91 @@ async function parseWebhookBody(
 }
 
 /**
+ * Update project node with video URL
+ */
+async function updateProjectNodeWithVideo(
+    projectId: string,
+    nodeId: string,
+    videoUrl: string
+): Promise<void> {
+    const [project] = await database
+        .select()
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .limit(1);
+
+    if (!project) {
+        throw new Error('Project not found');
+    }
+
+    const content = project.content as any;
+    if (!content || !Array.isArray(content.nodes)) {
+        throw new Error('Invalid project content');
+    }
+
+    const updatedNodes = content.nodes.map((node: any) => {
+        if (node.id === nodeId) {
+            return {
+                ...node,
+                data: {
+                    ...node.data,
+                    generated: {
+                        url: videoUrl,
+                        type: 'video/mp4',
+                    },
+                    updatedAt: new Date().toISOString(),
+                },
+            };
+        }
+        return node;
+    });
+
+    await database
+        .update(projects)
+        .set({
+            content: { ...content, nodes: updatedNodes },
+            updatedAt: new Date(),
+        })
+        .where(eq(projects.id, projectId));
+}
+
+/**
+ * Upload video from URL to permanent storage
+ */
+async function uploadVideoToStorage(
+    videoUrl: string,
+    userId: string
+): Promise<string> {
+    console.log('[KIE Webhook] Uploading video to storage...');
+
+    const videoResponse = await fetch(videoUrl);
+    if (!videoResponse.ok) {
+        throw new Error(`Failed to fetch video: ${videoResponse.status}`);
+    }
+
+    const videoArrayBuffer = await videoResponse.arrayBuffer();
+    const videoBuffer = Buffer.from(videoArrayBuffer);
+    console.log('[KIE Webhook] Video downloaded, size:', videoBuffer.length, 'bytes');
+
+    const storage = getStorageProvider();
+    const fileName = `${nanoid()}.mp4`;
+
+    const uploadResult = await storage.upload(
+        userId,
+        'files',
+        fileName,
+        videoBuffer,
+        {
+            contentType: 'video/mp4',
+            upsert: false,
+        }
+    );
+
+    console.log('[KIE Webhook] Video uploaded to storage:', uploadResult.url);
+    return uploadResult.url;
+}
+
+/**
  * POST handler para webhook KIE.ai
  */
 export async function POST(request: NextRequest) {
@@ -198,12 +288,118 @@ export async function POST(request: NextRequest) {
             hasError: !!normalized.error,
         });
 
-        // 3. Processar webhook usando handler unificado
+        // 3. Check if this is a video job
+        const [job] = await database
+            .select()
+            .from(falJobs)
+            .where(eq(falJobs.requestId, normalized.requestId))
+            .limit(1);
+
+        if (job && job.type === 'video') {
+            // Handle video webhook
+            if (normalized.status === 'failed') {
+                await database
+                    .update(falJobs)
+                    .set({
+                        status: 'failed',
+                        error: normalized.error || 'Unknown error',
+                        completedAt: new Date(),
+                    })
+                    .where(eq(falJobs.id, job.id));
+
+                return NextResponse.json({ success: true }, { status: 200 });
+            }
+
+            if (normalized.status === 'completed') {
+                // Parse resultJson to get video URL
+                let videoUrl: string | null = null;
+
+                if (typeof normalized.result === 'string') {
+                    try {
+                        const parsed = JSON.parse(normalized.result);
+                        videoUrl = parsed.resultUrls?.[0];
+                    } catch {
+                        console.error('❌ Failed to parse resultJson');
+                    }
+                } else if (normalized.result && typeof normalized.result === 'object') {
+                    videoUrl = (normalized.result as any).resultUrls?.[0];
+                }
+
+                if (!videoUrl) {
+                    console.error('❌ No video URL in result');
+                    await database
+                        .update(falJobs)
+                        .set({
+                            status: 'failed',
+                            error: 'No video URL in result',
+                            completedAt: new Date(),
+                        })
+                        .where(eq(falJobs.id, job.id));
+
+                    return NextResponse.json({ error: 'No video URL' }, { status: 400 });
+                }
+
+                try {
+                    const permanentUrl = await uploadVideoToStorage(videoUrl, job.userId);
+
+                    await database
+                        .update(falJobs)
+                        .set({
+                            status: 'completed',
+                            result: {
+                                video: { url: permanentUrl },
+                            },
+                            completedAt: new Date(),
+                        })
+                        .where(eq(falJobs.id, job.id));
+
+                    console.log('✅ Video job completed');
+
+                    // Atualizar o nó do projeto com o vídeo (similar às imagens)
+                    const jobInput = job.input as any;
+                    if (jobInput?._metadata?.projectId && jobInput?._metadata?.nodeId) {
+                        console.log('[KIE Webhook] Updating project node with video:', {
+                            projectId: jobInput._metadata.projectId,
+                            nodeId: jobInput._metadata.nodeId,
+                            videoUrl: permanentUrl,
+                        });
+
+                        try {
+                            await updateProjectNodeWithVideo(
+                                jobInput._metadata.projectId,
+                                jobInput._metadata.nodeId,
+                                permanentUrl
+                            );
+                            console.log('[KIE Webhook] Project node updated successfully');
+                        } catch (updateError) {
+                            console.error('[KIE Webhook] Failed to update project node:', updateError);
+                            // Não falhar o webhook se a atualização do projeto falhar
+                        }
+                    }
+
+                    return NextResponse.json({ success: true }, { status: 200 });
+                } catch (uploadError) {
+                    console.error('❌ Failed to upload video:', uploadError);
+                    await database
+                        .update(falJobs)
+                        .set({
+                            status: 'failed',
+                            error: `Upload failed: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`,
+                            completedAt: new Date(),
+                        })
+                        .where(eq(falJobs.id, job.id));
+
+                    return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
+                }
+            }
+        }
+
+        // 4. Handle image webhook (existing logic)
         const result = await processImageWebhook(normalized);
 
         console.log('✅ Webhook processed:', result);
 
-        // 4. Retornar resposta
+        // 5. Retornar resposta
         return NextResponse.json({
             message: result.message,
             status: result.status,

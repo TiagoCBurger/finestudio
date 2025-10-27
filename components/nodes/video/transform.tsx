@@ -263,8 +263,9 @@ export const VideoTransform = ({
       const isPending = nodeData.status === 'pending';
 
       if (isPending) {
-        // Update node with pending status
-        updateNodeData(id, response.nodeData);
+        // ✅ NÃO salvar no banco - apenas manter loading local
+        // O webhook vai atualizar o banco quando completar
+        // Isso evita flickering causado por Realtime trazendo versão antiga
         shouldClearLoading = false; // Don't clear loading, wait for Realtime
         setShouldShowSuccessToast(true); // Mark that we should show toast on completion
 
@@ -273,11 +274,12 @@ export const VideoTransform = ({
           duration: 5000
         });
 
-        console.log('[Video Transform] Job submitted to webhook queue', {
+        console.log('[Video Transform] Job submitted to webhook queue (local loading only)', {
           nodeId: id,
           projectId: project.id,
           requestId: nodeData.requestId,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          note: 'Not saving to DB to avoid flickering'
         });
       } else {
         // Synchronous mode (no webhook) - update immediately

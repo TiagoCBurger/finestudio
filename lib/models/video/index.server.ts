@@ -3,6 +3,7 @@ import {
     providers,
 } from '@/lib/providers';
 import { falServer } from './fal.server';
+import { kieServer } from './kie.server';
 import type { TersaVideoModel } from './index';
 
 export const videoModelsServer: Record<string, TersaVideoModel> = {
@@ -59,6 +60,24 @@ export const videoModelsServer: Record<string, TersaVideoModel> = {
                 getCost: ({ duration }) => {
                     // Assuming similar pricing to other text-to-video models
                     return duration <= 5 ? 0.5 : 1.0;
+                },
+            },
+        ],
+        durations: [5, 10],
+        aspectRatios: ['16:9', '9:16', '1:1'],
+        enabled: true,
+    },
+    'kie-kling-v2.5-turbo-pro': {
+        label: 'Kling Video v2.5 Turbo Pro (KIE)',
+        chef: providers.kie,
+        providers: [
+            {
+                ...providers.kie,
+                model: kieServer('kling/v2-5-turbo-image-to-video-pro'),
+
+                // KIE pricing for Kling v2.5 Turbo Pro
+                getCost: ({ duration }) => {
+                    return duration <= 5 ? 0.35 : 0.7;
                 },
             },
         ],

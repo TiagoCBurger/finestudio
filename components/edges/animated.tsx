@@ -16,26 +16,26 @@ const getHandleCoordsByPosition = (
   // Choose the handle type based on position - Left is for target, Right is for source
   const handleType = handlePosition === Position.Left ? 'target' : 'source';
 
-  // Se handleId for fornecido, procurar pelo handle específico
-  // Caso contrário, pegar o primeiro handle na posição
   let handle;
 
   if (handleId) {
-    // Primeiro tentar encontrar pelo ID exato
+    // Procurar pelo handle específico usando o ID
     handle = node.internals.handleBounds?.[handleType]?.find(
-      (h) => h.id === handleId && h.position === handlePosition
+      (h) => h.id === handleId
     );
-  }
 
-  // Fallback: pegar o primeiro handle na posição
-  if (!handle) {
+    if (!handle) {
+      return [0, 0];
+    }
+  } else {
+    // Se não tem handleId, pegar o primeiro handle na posição
     handle = node.internals.handleBounds?.[handleType]?.find(
       (h) => h.position === handlePosition
     );
-  }
 
-  if (!handle) {
-    return [0, 0];
+    if (!handle) {
+      return [0, 0];
+    }
   }
 
   let offsetX = handle.width / 2;
@@ -90,9 +90,9 @@ const getEdgeParams = (
 
 export const AnimatedEdge = (props: EdgeProps) => {
   const { id, source, target, markerEnd, style } = props;
-  // Acessar sourceHandle e targetHandle diretamente do props (podem não estar no tipo)
-  const sourceHandle = (props as any).sourceHandle;
-  const targetHandle = (props as any).targetHandle;
+  // ReactFlow usa sourceHandleId e targetHandleId
+  const sourceHandleId = (props as any).sourceHandleId;
+  const targetHandleId = (props as any).targetHandleId;
 
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
@@ -104,8 +104,8 @@ export const AnimatedEdge = (props: EdgeProps) => {
   const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(
     sourceNode,
     targetNode,
-    sourceHandle,
-    targetHandle
+    sourceHandleId,
+    targetHandleId
   );
 
   const [edgePath] = getBezierPath({

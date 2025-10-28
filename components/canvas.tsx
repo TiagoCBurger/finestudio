@@ -331,6 +331,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
         type: 'animated',
         ...connection,
       };
+
       setEdges((eds: Edge[]) => eds.concat(newEdge));
       save();
       onConnect?.(connection);

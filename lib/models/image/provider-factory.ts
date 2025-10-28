@@ -86,8 +86,8 @@ export function getImageProvider(providerType: ProviderType): ImageProviderBase 
 export function getProviderByModelId(modelId: string): ImageProviderBase {
     // Determinar provider baseado no model ID
 
-    // KIE models: google/* ou kie-*
-    if (modelId.startsWith('google/') || modelId.startsWith('kie-')) {
+    // KIE models: google/*, kie-*, kie/*
+    if (modelId.startsWith('google/') || modelId.startsWith('kie-') || modelId.startsWith('kie/')) {
         return getImageProvider('kie');
     }
 

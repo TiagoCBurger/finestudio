@@ -20,17 +20,20 @@ const MAX_KIE_IMAGES = 10;
 const KIE_MODELS = {
     NANO_BANANA: 'google/nano-banana',
     NANO_BANANA_EDIT: 'google/nano-banana-edit',
+    GPT_4O_IMAGE: 'kie/gpt-4o-image',
 } as const;
 
 /**
  * Resposta da API KIE.ai
  */
 interface KieApiResponse {
+    code?: number;
+    msg?: string;
     data?: {
         taskId?: string;
         recordId?: string;
         id?: string;
-    };
+    } | null;
     taskId?: string;
     recordId?: string;
     id?: string;
@@ -61,6 +64,18 @@ export class KieImageProvider extends ImageProviderBase {
     protected async submitToExternalAPI(
         input: ImageGenerationInput
     ): Promise<{ requestId: string; tempJobId?: string }> {
+        // Verificar se é o modelo GPT-4o Image
+        const isGpt4oImage = input.modelId === 'kie/gpt-4o-image' || input.modelId === 'kie-gpt-4o-image';
+
+        console.log('🔍 [KIE] Model routing check:', {
+            modelId: input.modelId,
+            isGpt4oImage,
+        });
+
+        if (isGpt4oImage) {
+            return this.submitGpt4oImageJob(input);
+        }
+
         // Converter model ID se necessário (kie-nano-banana → google/nano-banana)
         const apiModelId = this.convertModelId(input.modelId);
 
@@ -90,6 +105,96 @@ export class KieImageProvider extends ImageProviderBase {
         }
 
         console.log('✅ [KIE] Job submitted successfully:', { requestId });
+
+        return { requestId };
+    }
+
+    /**
+     * Submeter job para GPT-4o Image API
+     */
+    private async submitGpt4oImageJob(
+        input: ImageGenerationInput
+    ): Promise<{ requestId: string; tempJobId?: string }> {
+        const requestBody: any = {
+            size: input.size || '1:1',
+            nVariants: 1,
+            isEnhance: false,
+            uploadCn: false,
+            enableFallback: false,
+            fallbackModel: 'FLUX_MAX',
+        };
+
+        // Adicionar prompt se fornecido
+        if (input.prompt) {
+            requestBody.prompt = input.prompt;
+        }
+
+        // Adicionar imagens se fornecidas
+        if (input.images && input.images.length > 0) {
+            requestBody.filesUrl = input.images.slice(0, 5); // Max 5 images
+
+            if (input.images.length > 5) {
+                console.warn('⚠️ [KIE GPT-4o] Max 5 images supported. Extra images ignored.');
+            }
+        }
+
+        // Adicionar callback URL se disponível
+        if (this.config.webhookUrl) {
+            requestBody.callBackUrl = this.config.webhookUrl;
+        }
+
+        console.log('📤 [KIE GPT-4o] Sending request:', {
+            hasPrompt: !!requestBody.prompt,
+            hasImages: !!requestBody.filesUrl,
+            imageCount: requestBody.filesUrl?.length ?? 0,
+            size: requestBody.size,
+            callBackUrl: requestBody.callBackUrl,
+        });
+
+        const response = await fetch('https://api.kie.ai/api/v1/gpt4o-image/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${this.config.apiKey}`,
+            },
+            body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ [KIE GPT-4o] API error:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText,
+            });
+            throw new Error(`KIE GPT-4o API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = (await response.json()) as KieApiResponse;
+
+        console.log('📥 [KIE GPT-4o] API response (full):', JSON.stringify(data, null, 2));
+        console.log('📥 [KIE GPT-4o] API response (summary):', {
+            code: data.code,
+            msg: data.msg,
+            hasData: !!data.data,
+            dataKeys: data.data ? Object.keys(data.data) : [],
+            taskId: data.data?.taskId,
+            topLevelKeys: Object.keys(data),
+        });
+
+        // Verificar código de resposta
+        if (data.code !== 200) {
+            throw new Error(`KIE GPT-4o API error: ${data.msg || 'Unknown error'}`);
+        }
+
+        const requestId = this.extractRequestId(data);
+
+        if (!requestId) {
+            console.error('❌ [KIE GPT-4o] No request ID in response:', JSON.stringify(data, null, 2));
+            throw new Error('KIE GPT-4o API did not return a valid task ID');
+        }
+
+        console.log('✅ [KIE GPT-4o] Job submitted successfully:', { requestId });
 
         return { requestId };
     }
@@ -218,15 +323,31 @@ export class KieImageProvider extends ImageProviderBase {
      * Extrair request ID da resposta
      */
     private extractRequestId(response: KieApiResponse): string | null {
-        return (
-            response.data?.taskId ||
-            response.data?.recordId ||
-            response.data?.id ||
+        console.log('🔍 [KIE] Extracting request ID from:', {
+            hasData: !!response.data,
+            dataIsNull: response.data === null,
+            'data?.taskId': response.data?.taskId,
+            'data?.recordId': response.data?.recordId,
+            'data?.id': response.data?.id,
+            'taskId': response.taskId,
+            'recordId': response.recordId,
+            'id': response.id,
+        });
+
+        // Se data é null, não tente acessar suas propriedades
+        const requestId = (
+            (response.data && response.data.taskId) ||
+            (response.data && response.data.recordId) ||
+            (response.data && response.data.id) ||
             response.taskId ||
             response.recordId ||
             response.id ||
             null
         );
+
+        console.log('🔍 [KIE] Extracted request ID:', requestId);
+
+        return requestId;
     }
 }
 
@@ -248,7 +369,7 @@ export function createKieImageProvider(webhookUrl?: string): KieImageProvider {
  * KIE AI Server - AI SDK compatible interface
  */
 export const kieAIServer = {
-    image: (modelId: 'google/nano-banana' | 'google/nano-banana-edit'): ImageModel => ({
+    image: (modelId: 'google/nano-banana' | 'google/nano-banana-edit' | 'kie/gpt-4o-image'): ImageModel => ({
         modelId,
         provider: 'kie' as const,
         specificationVersion: 'v2' as const,

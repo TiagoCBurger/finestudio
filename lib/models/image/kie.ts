@@ -3,6 +3,7 @@ import type { ImageModel } from 'ai';
 const models = [
     'google/nano-banana',
     'google/nano-banana-edit',
+    'kie/gpt-4o-image',
 ] as const;
 
 type KieModel = (typeof models)[number];

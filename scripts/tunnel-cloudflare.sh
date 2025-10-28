@@ -26,4 +26,5 @@ echo "🌐 Starting tunnel..."
 echo "⚠️  Copy the HTTPS URL that appears below and update your .env file"
 echo ""
 
-cloudflared tunnel --url http://localhost:$PORT
+# Use quick tunnel (no authentication required)
+cloudflared tunnel --no-autoupdate --url http://localhost:$PORT

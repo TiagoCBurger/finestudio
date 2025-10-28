@@ -175,6 +175,22 @@ export const imageModels: Record<string, TersaImageModel> = {
       },
     },
   },
+  'kie-gpt-4o-image': {
+    label: 'GPT-4o Image (Kie.ai)',
+    chef: providers.kie,
+    providers: [
+      {
+        ...providers.kie,
+        model: kieAI.image('kie/gpt-4o-image'),
+        getCost: () => 0.04, // Adjust based on actual pricing
+      },
+    ],
+    sizes: ['1:1', '3:2', '2:3'], // As per API spec
+    priceIndicator: 'low',
+    supportsEdit: true, // Supports up to 5 reference images
+    default: false,
+    enabled: true,
+  },
 };
 
 /**

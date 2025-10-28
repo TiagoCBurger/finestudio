@@ -111,6 +111,11 @@ function extractResult(payload: KieWebhookPayload): unknown {
         return payload.data.resultJson;
     }
 
+    // Check for GPT-4o Image format (images array directly in data)
+    if (payload.data?.images && Array.isArray(payload.data.images)) {
+        return { images: payload.data.images };
+    }
+
     // Fallback para result ou data
     return payload.result || payload.data || null;
 }
@@ -262,14 +267,18 @@ async function uploadVideoToStorage(
  * POST handler para webhook KIE.ai
  */
 export async function POST(request: NextRequest) {
+    console.log('🔔 [KIE Webhook] Received webhook request');
+
     try {
         // 1. Parsear body
         const parseResult = await parseWebhookBody(request);
         if (!parseResult.success) {
+            console.error('❌ [KIE Webhook] Failed to parse body:', parseResult.error);
             return NextResponse.json({ error: parseResult.error }, { status: 400 });
         }
 
         const body = parseResult.body;
+        console.log('📦 [KIE Webhook] Parsed body:', JSON.stringify(body, null, 2));
 
         // 2. Normalizar payload
         const normalized = normalizeKiePayload(body);
@@ -395,9 +404,14 @@ export async function POST(request: NextRequest) {
         }
 
         // 4. Handle image webhook (existing logic)
+        console.log('🖼️ [KIE Webhook] Processing as image webhook:', {
+            requestId: normalized.requestId,
+            status: normalized.status,
+        });
+
         const result = await processImageWebhook(normalized);
 
-        console.log('✅ Webhook processed:', result);
+        console.log('✅ [KIE Webhook] Image webhook processed:', result);
 
         // 5. Retornar resposta
         return NextResponse.json({

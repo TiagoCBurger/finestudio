@@ -5,7 +5,6 @@ import {
 } from '@/lib/providers';
 import type { PriceBracket } from '@/providers/gateway/client';
 import type { ImageModel } from 'ai';
-import { falAIServer } from './fal.server';
 import { kieAIServer } from './kie.server';
 
 /**
@@ -66,47 +65,6 @@ const KIE_ASPECT_RATIOS: ImageSize[] = [
     '21:9',
     'auto',
 ];
-
-/**
- * Helper to create a Fal AI image model configuration
- */
-function createFalImageModel(
-    modelId: Parameters<typeof falAIServer.image>[0],
-    config: {
-        label: string;
-        cost: number;
-        supportsEdit?: boolean;
-        enabled?: boolean;
-        priceIndicator?: PriceBracket;
-        isDefault?: boolean;
-        sizes?: ImageSize[];
-    }
-): TersaImageModel {
-    const model: TersaImageModel = {
-        label: config.label,
-        chef: providers.fal,
-        providers: [
-            {
-                ...providers.fal,
-                model: falAIServer.image(modelId),
-                getCost: () => config.cost,
-            },
-        ],
-        sizes: config.sizes ?? STANDARD_IMAGE_SIZES,
-        supportsEdit: config.supportsEdit ?? false,
-        enabled: config.enabled ?? true,
-    };
-
-    if (config.priceIndicator) {
-        model.priceIndicator = config.priceIndicator;
-    }
-
-    if (config.isDefault) {
-        model.default = true;
-    }
-
-    return model;
-}
 
 /**
  * Helper to create a Kie AI image model configuration
@@ -184,47 +142,18 @@ function createKieImageModel(
  * ```
  */
 export const imageModelsServer: Record<string, TersaImageModel> = {
-    'fal-nano-banana': createFalImageModel('fal-ai/nano-banana/edit', {
-        label: '🍌 Nano Banana',
-        cost: 2,
-        supportsEdit: true,
-        priceIndicator: 'low',
-        isDefault: true,
-    }),
-
-    'fal-flux-dev-image-to-image': createFalImageModel('fal-ai/flux/dev/image-to-image', {
-        label: 'FLUX Dev Image-to-Image (Fal)',
-        cost: 0.025,
-        supportsEdit: true,
-    }),
-
-    'fal-gpt-image-edit': createFalImageModel('fal-ai/gpt-image-1/edit-image/byok', {
-        label: 'GPT Image Edit (BYOK)',
-        cost: 0.02,
-        supportsEdit: true,
-        enabled: false,
-    }),
-
-    'fal-flux-pro-kontext': createFalImageModel('fal-ai/flux-pro/kontext', {
-        label: 'FLUX Pro Kontext (Fal)',
-        cost: 0.055,
-    }),
-
-    'fal-flux-pro-kontext-max-multi': createFalImageModel('fal-ai/flux-pro/kontext/max/multi', {
-        label: 'FLUX Pro Kontext Max Multi (Fal)',
-        cost: 0.06,
-    }),
-
-    'fal-ideogram-character': createFalImageModel('fal-ai/ideogram/character', {
-        label: 'Ideogram Character (Fal)',
-        cost: 0.08,
-    }),
-
     'kie-nano-banana': createKieImageModel('google/nano-banana', {
-        label: '🍌 Nano Banana (Kie.ai)',
+        label: '🍌 Nano Banana',
         cost: 0.03,
         priceIndicator: 'low',
         sizes: KIE_ASPECT_RATIOS, // Use aspect ratios directly (1:1, 9:16, etc)
         editModelId: 'google/nano-banana-edit', // Usa modelo de edição quando há imagem
+    }),
+
+    'kie-gpt-4o-image': createKieImageModel('kie/gpt-4o-image', {
+        label: 'GPT-4o Image',
+        cost: 0.04,
+        priceIndicator: 'low',
+        sizes: ['1:1', '3:2', '2:3'], // As per API spec
     }),
 };

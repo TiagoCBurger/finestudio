@@ -526,7 +526,99 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
   }, [getNodes]);
 
   const handlePaste = useCallback(async (event?: ClipboardEvent | globalThis.ClipboardEvent) => {
-    // First, try to paste copied nodes
+    console.log('🎯 handlePaste called:', {
+      hasEvent: !!event,
+      hasProjectId: !!project?.id,
+      copiedNodesCount: copiedNodes.length,
+      hasClipboardData: !!event?.clipboardData,
+    });
+
+    // Check for image in clipboard first
+    if (event && project?.id) {
+      const items = event.clipboardData?.items;
+
+      if (items) {
+        console.log('📋 Clipboard items:', {
+          count: items.length,
+          types: Array.from(items).map(item => ({
+            type: item.type,
+            kind: item.kind,
+          }))
+        });
+
+        // Check if there's an image in clipboard
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+
+          console.log(`📄 Checking item ${i}:`, {
+            type: item.type,
+            kind: item.kind,
+            isImage: item.type.indexOf('image') !== -1,
+          });
+
+          if (item.type.indexOf('image') !== -1) {
+            event.preventDefault();
+
+            const file = item.getAsFile();
+            console.log('📁 Got file from clipboard:', {
+              hasFile: !!file,
+              fileName: file?.name,
+              fileSize: file?.size,
+              fileType: file?.type,
+            });
+
+            if (!file) {
+              console.log('❌ No file extracted from clipboard item');
+              continue;
+            }
+
+            try {
+              console.log('⬆️ Starting image upload...');
+              toast.info('Uploading image...');
+
+              // Upload the image first
+              const { url, type } = await uploadFile(file, 'files');
+              console.log('✅ Upload complete:', { url, type });
+
+              // Create node with the uploaded image URL
+              const nodeId = nanoid();
+              const newNode: Node = {
+                id: nodeId,
+                type: 'image',
+                data: {
+                  content: {
+                    url,
+                    type,
+                  }
+                },
+                position: screenToFlowPosition({
+                  x: window.innerWidth / 2,
+                  y: window.innerHeight / 2
+                }),
+                origin: [0, 0.5],
+              };
+
+              setNodes((nds: Node[]) => nds.concat(newNode));
+              console.log('✅ Created image node:', nodeId);
+
+              save();
+              toast.success('Image pasted successfully');
+
+              analytics.track('canvas', 'image', 'pasted', {
+                type,
+              });
+
+              return; // Exit after handling image
+            } catch (error) {
+              handleError('Error pasting image', error);
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    // If no image found, try to paste copied nodes
     if (copiedNodes.length > 0) {
       console.log('📌 Pasting nodes:', {
         count: copiedNodes.length,
@@ -590,107 +682,7 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
       return;
     }
 
-    // If no nodes copied, try to paste an image from clipboard
-    console.log('🖼️ Checking for image in clipboard:', {
-      hasEvent: !!event,
-      hasProjectId: !!project?.id,
-      hasClipboardData: !!event?.clipboardData,
-      itemsCount: event?.clipboardData?.items?.length,
-    });
-
-    if (event && project?.id) {
-      const items = event.clipboardData?.items;
-      if (!items) {
-        console.log('❌ No clipboard items found');
-        return;
-      }
-
-      console.log('📋 Clipboard items:', {
-        count: items.length,
-        types: Array.from(items).map(item => ({
-          type: item.type,
-          kind: item.kind,
-        }))
-      });
-
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-
-        console.log(`📄 Checking item ${i}:`, {
-          type: item.type,
-          kind: item.kind,
-          isImage: item.type.indexOf('image') !== -1,
-        });
-
-        if (item.type.indexOf('image') !== -1) {
-          event.preventDefault();
-
-          const file = item.getAsFile();
-          console.log('📁 Got file from clipboard:', {
-            hasFile: !!file,
-            fileName: file?.name,
-            fileSize: file?.size,
-            fileType: file?.type,
-          });
-
-          if (!file) {
-            console.log('❌ No file extracted from clipboard item');
-            continue;
-          }
-
-          try {
-            console.log('⬆️ Starting image upload...');
-            toast.info('Uploading image...');
-
-            // Create node first with loading state
-            const nodeId = nanoid();
-            const newNode: Node = {
-              id: nodeId,
-              type: 'image',
-              data: {
-                state: {
-                  status: 'loading_image',
-                }
-              },
-              position: screenToFlowPosition({
-                x: window.innerWidth / 2,
-                y: window.innerHeight / 2
-              }),
-              origin: [0, 0.5],
-            };
-
-            setNodes((nds: Node[]) => nds.concat(newNode));
-            console.log('✅ Created loading node:', nodeId);
-
-            // Upload the image
-            const { url, type } = await uploadFile(file, 'files');
-            console.log('✅ Upload complete:', { url, type });
-
-            // Update node with uploaded image in ready state
-            updateNode(nodeId, {
-              data: {
-                state: {
-                  status: 'ready',
-                  url,
-                  timestamp: Date.now(),
-                }
-              },
-            });
-
-            save();
-            toast.success('Image pasted successfully');
-
-            analytics.track('canvas', 'image', 'pasted', {
-              type,
-            });
-          } catch (error) {
-            handleError('Error pasting image', error);
-          }
-
-          break;
-        }
-      }
-    }
+    console.log('ℹ️ Nothing to paste');
   }, [copiedNodes, save, project?.id, screenToFlowPosition, updateNode, analytics]);
 
 
@@ -727,14 +719,13 @@ export const Canvas = ({ children, ...props }: ReactFlowProps) => {
     preventDefault: true,
   });
 
-  useHotkeys('meta+v', () => handlePaste(), {
-    enableOnContentEditable: false,
-    preventDefault: true,
-  });
-
   // Handle paste event for both nodes and images
   useEffect(() => {
     const handlePasteEvent = (event: globalThis.ClipboardEvent) => {
+      console.log('📎 Paste event detected:', {
+        hasClipboardData: !!event.clipboardData,
+        itemsCount: event.clipboardData?.items?.length,
+      });
       handlePaste(event);
     };
 

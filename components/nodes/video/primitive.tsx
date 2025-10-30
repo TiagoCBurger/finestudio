@@ -9,7 +9,7 @@ import { handleError } from '@/lib/error/handle';
 import { uploadFile } from '@/lib/upload.client';
 import { useReactFlow } from '@xyflow/react';
 import { Loader2Icon } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { VideoNodeProps } from '.';
 
 type VideoPrimitiveProps = VideoNodeProps & {
@@ -25,7 +25,18 @@ export const VideoPrimitive = ({
   const { updateNodeData } = useReactFlow();
   const [files, setFiles] = useState<File[] | undefined>();
   const [isUploading, setIsUploading] = useState(false);
-  const [isVideoLoading, setIsVideoLoading] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const previousUrlRef = useRef<string | undefined>(data.content?.url);
+  const [isVideoLoading, setIsVideoLoading] = useState(false);
+
+  // Only show loading when URL changes
+  useEffect(() => {
+    const currentUrl = data.content?.url;
+    if (currentUrl && currentUrl !== previousUrlRef.current) {
+      setIsVideoLoading(true);
+      previousUrlRef.current = currentUrl;
+    }
+  }, [data.content?.url]);
 
   const handleDrop = async (files: File[]) => {
     if (isUploading) {
@@ -68,6 +79,7 @@ export const VideoPrimitive = ({
       )}
       {data.content && (
         <video
+          ref={videoRef}
           src={data.content.url}
           className="h-auto w-full cursor-pointer"
           style={{ display: isVideoLoading ? 'none' : 'block' }}

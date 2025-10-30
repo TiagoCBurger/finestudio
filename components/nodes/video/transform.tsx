@@ -23,6 +23,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { toast } from 'sonner';
@@ -38,11 +39,18 @@ type VideoTransformProps = VideoNodeProps & {
 };
 
 const getDefaultModel = (models: typeof videoModels) => {
-  const defaultModel = Object.entries(models).find(
-    ([_, model]) => model.default
-  );
+  if (!models || typeof models !== 'object') {
+    console.error('Invalid models object:', models);
+    throw new Error('Invalid models configuration');
+  }
+
+  const entries = Object.entries(models);
+  console.log('Available video models:', entries.map(([id, m]) => ({ id, default: m.default, enabled: m.enabled })));
+
+  const defaultModel = entries.find(([_, model]) => model.default);
 
   if (!defaultModel) {
+    console.error('No default model found in:', entries.map(([id, m]) => ({ id, default: m.default })));
     throw new Error('No default model found');
   }
 
@@ -76,6 +84,9 @@ export const VideoTransform = ({
     data.instructions ?? ''
   );
   const [videoLoading, setVideoLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const videoLoadedRef = useRef(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const project = useProject();
   const analytics = useAnalytics();
 
@@ -142,6 +153,7 @@ export const VideoTransform = ({
 
       setLoading(false);
       setPreviousUrl(currentUrl);
+      videoLoadedRef.current = false; // Reset for new video
 
       // Only show success toast if this was a new generation
       if (shouldShowSuccessToast) {
@@ -643,35 +655,63 @@ export const VideoTransform = ({
           </div>
         )}
         {data.generated?.url && !loading && (
-          <div className="relative w-full aspect-video">
+          <div
+            className="relative w-full aspect-video group"
+            onMouseEnter={async () => {
+              if (videoRef.current && videoLoadedRef.current) {
+                try {
+                  await videoRef.current.play();
+                  setIsPlaying(true);
+                } catch (error) {
+                  console.error('Error playing video:', error);
+                }
+              }
+            }}
+            onMouseLeave={() => {
+              if (videoRef.current) {
+                videoRef.current.pause();
+                videoRef.current.currentTime = 0;
+                setIsPlaying(false);
+              }
+            }}
+          >
             {videoLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-b-xl z-10">
+              <div className="absolute inset-0 flex items-center justify-center rounded-b-xl z-10">
                 <Loader2Icon
                   size={24}
-                  className="animate-spin text-white"
+                  className="animate-spin text-white drop-shadow-lg"
                 />
               </div>
             )}
             <video
+              ref={videoRef}
               src={data.generated.url}
+              poster={(data as any).thumbnail?.url}
               width={data.width ?? 800}
               height={data.height ?? 450}
               muted
               loop
               playsInline
-              onLoadStart={() => setVideoLoading(true)}
-              onCanPlay={() => setVideoLoading(false)}
-              onError={() => setVideoLoading(false)}
-              onMouseEnter={(e) => {
-                setVideoLoading(true);
-                e.currentTarget.play();
+              preload="auto"
+              onLoadStart={() => {
+                // Only show loading if video hasn't been loaded before
+                if (!videoLoadedRef.current) {
+                  setVideoLoading(true);
+                }
               }}
-              onMouseLeave={(e) => {
-                e.currentTarget.pause();
-                e.currentTarget.currentTime = 0;
+              onLoadedData={() => {
                 setVideoLoading(false);
+                videoLoadedRef.current = true;
               }}
-              className="w-full rounded-b-xl object-cover cursor-pointer"
+              onCanPlay={() => {
+                setVideoLoading(false);
+                videoLoadedRef.current = true;
+              }}
+              onError={() => {
+                setVideoLoading(false);
+                videoLoadedRef.current = false;
+              }}
+              className="w-full rounded-b-xl object-cover cursor-pointer bg-secondary"
             />
           </div>
         )}

@@ -53,8 +53,8 @@ export const videoModels: Record<string, TersaVideoModel> = {
     ],
     durations: [5, 10],
     aspectRatios: ['16:9', '9:16', '1:1'],
-    default: true,
-    enabled: true,
+    default: false,
+    enabled: false, // Disabled - only kie models enabled
   },
   'fal-sora-2-pro': {
     label: 'Sora 2 Pro',
@@ -73,7 +73,7 @@ export const videoModels: Record<string, TersaVideoModel> = {
     ],
     durations: [4, 8, 12],
     aspectRatios: ['16:9', '9:16', '1:1'],
-    enabled: true,
+    enabled: false, // Disabled - only kie models enabled
   },
   'fal-wan-25-preview': {
     label: 'WAN-25 Preview (Text-to-Video)',
@@ -92,10 +92,10 @@ export const videoModels: Record<string, TersaVideoModel> = {
     ],
     durations: [5, 10],
     aspectRatios: ['16:9', '9:16', '1:1'],
-    enabled: true,
+    enabled: false, // Disabled - only kie models enabled
   },
   'kie-kling-v2.5-turbo-pro': {
-    label: 'Kling Video v2.5 Turbo Pro (KIE)',
+    label: 'Kling Video v2.5 Turbo Pro',
     chef: providers.kie,
     providers: [
       {
@@ -113,6 +113,7 @@ export const videoModels: Record<string, TersaVideoModel> = {
     ],
     durations: [5, 10],
     aspectRatios: ['16:9', '9:16', '1:1'],
+    default: true,
     enabled: true,
   },
 };

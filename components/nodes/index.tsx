@@ -4,7 +4,6 @@ import { DropNode } from './drop';
 import { FileNode } from './file';
 import { ImageNode } from './image';
 import { TextNode } from './text';
-import { TweetNode } from './tweet';
 import { VideoNode } from './video';
 
 export const nodeTypes = {
@@ -15,5 +14,4 @@ export const nodeTypes = {
   audio: AudioNode,
   code: CodeNode,
   file: FileNode,
-  tweet: TweetNode,
 };

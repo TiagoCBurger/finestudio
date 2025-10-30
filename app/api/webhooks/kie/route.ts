@@ -76,6 +76,12 @@ function normalizeStatus(
         return 'failed';
     }
 
+    // Check for GPT-4o Image success format (code: 200 with result_urls)
+    const code = (payload as any).code;
+    if (code === 200 && payload.data?.info && typeof payload.data.info === 'object' && payload.data.info !== null && 'result_urls' in payload.data.info) {
+        return 'completed';
+    }
+
     return 'pending';
 }
 
@@ -109,6 +115,14 @@ function extractResult(payload: KieWebhookPayload): unknown {
 
     if (payload.data && 'resultJson' in payload.data) {
         return payload.data.resultJson;
+    }
+
+    // Check for GPT-4o Image format (result_urls in data.info)
+    if (payload.data?.info && typeof payload.data.info === 'object' && payload.data.info !== null && 'result_urls' in payload.data.info) {
+        const info = payload.data.info as any;
+        if (Array.isArray(info.result_urls)) {
+            return { resultUrls: info.result_urls };
+        }
     }
 
     // Check for GPT-4o Image format (images array directly in data)

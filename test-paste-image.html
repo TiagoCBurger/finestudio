@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Paste Image</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        #log {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #ccc;
+        }
+        .log-info { border-color: #2196F3; }
+        .log-success { border-color: #4CAF50; }
+        .log-error { border-color: #f44336; }
+        #preview {
+            margin-top: 20px;
+            border: 2px dashed #ccc;
+            padding: 20px;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #preview img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Paste Image Functionality</h1>
+    <p>Copy an image and paste it here (Cmd+V or Ctrl+V)</p>
+    
+    <div id="log"></div>
+    <div id="preview">
+        <p>Pasted image will appear here</p>
+    </div>
+
+    <script>
+        const log = document.getElementById('log');
+        const preview = document.getElementById('preview');
+
+        function addLog(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        addLog('Paste listener initialized', 'success');
+
+        document.addEventListener('paste', async (event) => {
+            addLog('Paste event detected!', 'info');
+            
+            const items = event.clipboardData?.items;
+            if (!items) {
+                addLog('No clipboard items found', 'error');
+                return;
+            }
+
+            addLog(`Found ${items.length} clipboard items`, 'info');
+
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                addLog(`Item ${i}: type=${item.type}, kind=${item.kind}`, 'info');
+
+                if (item.type.indexOf('image') !== -1) {
+                    addLog('Image detected!', 'success');
+                    event.preventDefault();
+
+                    const file = item.getAsFile();
+                    if (!file) {
+                        addLog('Failed to get file from clipboard item', 'error');
+                        continue;
+                    }
+
+                    addLog(`File: name=${file.name}, size=${file.size}, type=${file.type}`, 'success');
+
+                    // Create preview
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        preview.innerHTML = `<img src="${e.target.result}" alt="Pasted image">`;
+                        addLog('Image preview created', 'success');
+                    };
+                    reader.readAsDataURL(file);
+
+                    break;
+                }
+            }
+        });
+
+        // Test keyboard shortcut
+        document.addEventListener('keydown', (event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'v') {
+                addLog('Cmd/Ctrl+V detected', 'info');
+            }
+        });
+    </script>
+</body>
+</html>

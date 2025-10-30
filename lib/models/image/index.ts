@@ -75,7 +75,7 @@ export const imageModels: Record<string, TersaImageModel> = {
     priceIndicator: 'low',
     supportsEdit: true,
     default: false,
-    enabled: true,
+    enabled: false, // Disabled - only kie models enabled
   },
   'fal-flux-dev-image-to-image': {
     label: 'FLUX Dev Image-to-Image',
@@ -90,8 +90,8 @@ export const imageModels: Record<string, TersaImageModel> = {
     ],
     sizes: STANDARD_SIZES,
     supportsEdit: true,
-    default: true,
-    enabled: true,
+    default: false,
+    enabled: false, // Disabled - only kie models enabled
   },
   'fal-gpt-image-edit': {
     label: 'GPT Image Edit (BYOK)',
@@ -122,7 +122,7 @@ export const imageModels: Record<string, TersaImageModel> = {
     ],
     sizes: STANDARD_SIZES,
     supportsEdit: false, // Apenas geração, não edição
-    enabled: true,
+    enabled: false, // Disabled - only kie models enabled
   },
   'fal-flux-pro-kontext-max-multi': {
     label: 'FLUX Pro Kontext Max Multi (Fal)',
@@ -137,7 +137,7 @@ export const imageModels: Record<string, TersaImageModel> = {
     ],
     sizes: STANDARD_SIZES,
     supportsEdit: false, // Apenas geração, não edição
-    enabled: true,
+    enabled: false, // Disabled - only kie models enabled
   },
   'fal-ideogram-character': {
     label: 'Ideogram Character (Fal)',
@@ -152,10 +152,10 @@ export const imageModels: Record<string, TersaImageModel> = {
     ],
     sizes: STANDARD_SIZES,
     supportsEdit: false, // Apenas geração, não edição
-    enabled: true,
+    enabled: false, // Disabled - only kie models enabled
   },
   'kie-nano-banana': {
-    label: '🍌 Nano Banana (Kie.ai)',
+    label: '🍌 Nano Banana',
     chef: providers.kie,
     providers: [
       {
@@ -167,7 +167,7 @@ export const imageModels: Record<string, TersaImageModel> = {
     sizes: KIE_ASPECT_RATIOS, // Use aspect ratios directly (1:1, 16:9, etc)
     priceIndicator: 'low',
     supportsEdit: true, // ✅ Suporta edição de imagem
-    default: false,
+    default: true, // ✅ Modelo padrão
     enabled: true,
     providerOptions: {
       kie: {
@@ -176,7 +176,7 @@ export const imageModels: Record<string, TersaImageModel> = {
     },
   },
   'kie-gpt-4o-image': {
-    label: 'GPT-4o Image (Kie.ai)',
+    label: 'GPT-4o Image',
     chef: providers.kie,
     providers: [
       {

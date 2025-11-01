@@ -85,7 +85,7 @@
     "@tiptap/pm": "^2.14.0",
     "@tiptap/react": "^2.14.0",
     "@tiptap/starter-kit": "^2.14.0",
-    "@tiptap/suggestion": "^2.14.0",
+    "@tiptap/suggestion": "^2.26.3",
     "@vercel/analytics": "^1.5.0",
     "@xyflow/react": "^12.7.0",
     "ai": "^5.0.0",

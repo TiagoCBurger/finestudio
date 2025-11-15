@@ -8,16 +8,19 @@ import { projects } from '@/schema';
 import { experimental_transcribe as transcribe } from 'ai';
 import { eq } from 'drizzle-orm';
 
+// Default transcription model
+const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
+
 export const transcribeAction = async (
   url: string,
   projectId: string
 ): Promise<
   | {
-      transcript: string;
-    }
+    transcript: string;
+  }
   | {
-      error: string;
-    }
+    error: string;
+  }
 > => {
   try {
     await getSubscribedUser();
@@ -30,7 +33,8 @@ export const transcribeAction = async (
       throw new Error('Project not found');
     }
 
-    const model = transcriptionModels[project.transcriptionModel];
+    // Use default transcription model
+    const model = transcriptionModels[DEFAULT_TRANSCRIPTION_MODEL];
 
     if (!model) {
       throw new Error('Model not found');

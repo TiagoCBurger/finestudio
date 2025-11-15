@@ -12,15 +12,11 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { handleError } from '@/lib/error/handle';
-import { transcriptionModels } from '@/lib/models/transcription';
-import { visionModels } from '@/lib/models/vision';
-import { useSubscription } from '@/providers/subscription';
 import type { projects } from '@/schema';
 import { SettingsIcon, TrashIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { type FormEventHandler, useState } from 'react';
 import { toast } from 'sonner';
-import { ModelSelector } from './nodes/model-selector';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -33,12 +29,7 @@ export const ProjectSettings = ({ data }: ProjectSettingsProps) => {
   const [open, setOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [name, setName] = useState(data.name);
-  const [transcriptionModel, setTranscriptionModel] = useState(
-    data.transcriptionModel
-  );
-  const [visionModel, setVisionModel] = useState(data.visionModel);
   const router = useRouter();
-  const { isSubscribed, plan } = useSubscription();
 
   const handleUpdateProject: FormEventHandler<HTMLFormElement> = async (
     event
@@ -54,8 +45,6 @@ export const ProjectSettings = ({ data }: ProjectSettingsProps) => {
 
       const response = await updateProjectAction(data.id, {
         name,
-        transcriptionModel,
-        visionModel,
       });
 
       if ('error' in response) {
@@ -111,28 +100,6 @@ export const ProjectSettings = ({ data }: ProjectSettingsProps) => {
               placeholder="My new project"
               value={name}
               onChange={({ target }) => setName(target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="transcriptionModel">Transcription model</Label>
-            <ModelSelector
-              id="transcriptionModel"
-              value={transcriptionModel}
-              options={transcriptionModels}
-              width={462}
-              onChange={setTranscriptionModel}
-              disabled={!isSubscribed || plan === 'hobby'}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="visionModel">Vision model</Label>
-            <ModelSelector
-              id="visionModel"
-              value={visionModel}
-              options={visionModels}
-              onChange={setVisionModel}
-              width={462}
-              disabled={!isSubscribed || plan === 'hobby'}
             />
           </div>
           <Button type="submit" disabled={isUpdating || !name.trim()}>

@@ -1,5 +1,4 @@
 import type { AudioNodeProps } from '@/components/nodes/audio';
-import type { CodeNodeProps } from '@/components/nodes/code';
 import type { FileNodeProps } from '@/components/nodes/file';
 import type { ImageNodeProps } from '@/components/nodes/image';
 import type { TextNodeProps } from '@/components/nodes/text';
@@ -176,24 +175,7 @@ export const isValidSourceTarget = (source: Node, target: Node) => {
   return true;
 };
 
-export const getCodeFromCodeNodes = (nodes: Node[]) => {
-  if (!Array.isArray(nodes)) {
-    console.error('getCodeFromCodeNodes: nodes is not an array', nodes);
-    return [];
-  }
 
-  const sourceCodes = nodes
-    .filter((node) => node.type === 'code')
-    .map((node) => (node.data as CodeNodeProps['data']).content)
-    .filter(Boolean) as { text: string; language: string }[];
-
-  const generatedCodes = nodes
-    .filter((node) => node.type === 'code' && node.data.generated)
-    .map((node) => (node.data as CodeNodeProps['data']).generated)
-    .filter(Boolean) as { text: string; language: string }[];
-
-  return [...sourceCodes, ...generatedCodes];
-};
 
 export const getFilesFromFileNodes = (nodes: Node[]) => {
   if (!Array.isArray(nodes)) {

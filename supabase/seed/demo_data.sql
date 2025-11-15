@@ -18,25 +18,21 @@ WHERE NOT EXISTS (
 INSERT INTO project (
   id,
   name,
-  transcription_model,
-  vision_model,
   user_id,
+  members,
   content,
-  demo_project,
   created_at
 )
 SELECT 
   'demo-project-001',
   'Demo Project - Image Generation',
-  'whisper-1',
-  'openai-gpt-4.1-nano',
   '00000000-0000-0000-0000-000000000000',
+  ARRAY['00000000-0000-0000-0000-000000000000'],
   jsonb_build_object(
     'nodes', '[]'::jsonb,
     'edges', '[]'::jsonb,
     'viewport', jsonb_build_object('x', 0, 'y', 0, 'zoom', 1)
   ),
-  true,
   NOW()
 WHERE NOT EXISTS (
   SELECT 1 FROM project WHERE id = 'demo-project-001'

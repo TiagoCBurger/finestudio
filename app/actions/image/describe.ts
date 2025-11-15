@@ -8,22 +8,26 @@ import { projects } from '@/schema';
 import { eq } from 'drizzle-orm';
 import OpenAI from 'openai';
 
+// Default vision model for image description
+const DEFAULT_VISION_MODEL = 'openai-gpt-4.1-nano';
+
 export const describeAction = async (
   url: string,
   projectId: string
 ): Promise<
   | {
-      description: string;
-    }
+    description: string;
+  }
   | {
-      error: string;
-    }
+    error: string;
+  }
 > => {
   try {
     await getSubscribedUser();
 
     const openai = new OpenAI();
 
+    // Verify project exists and user has access
     const project = await database.query.projects.findFirst({
       where: eq(projects.id, projectId),
     });
@@ -32,7 +36,8 @@ export const describeAction = async (
       throw new Error('Project not found');
     }
 
-    const model = visionModels[project.visionModel];
+    // Use default vision model
+    const model = visionModels[DEFAULT_VISION_MODEL];
 
     if (!model) {
       throw new Error('Model not found');

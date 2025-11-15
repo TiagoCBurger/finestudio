@@ -1,5 +1,4 @@
 import { AudioNode } from './audio';
-import { CodeNode } from './code';
 import { DropNode } from './drop';
 import { FileNode } from './file';
 import { ImageNode } from './image';
@@ -12,6 +11,5 @@ export const nodeTypes = {
   drop: DropNode,
   video: VideoNode,
   audio: AudioNode,
-  code: CodeNode,
   file: FileNode,
 };

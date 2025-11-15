@@ -1,9 +1,10 @@
 import { createBrowserClient } from '@supabase/ssr';
 import { realtimeLogger } from '@/lib/realtime-logger';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/lib/database.types';
 
 // Singleton instance to prevent multiple WebSocket connections
-let supabaseInstance: SupabaseClient | null = null;
+let supabaseInstance: SupabaseClient<Database> | null = null;
 
 /**
  * Reset the Supabase client instance
@@ -41,7 +42,7 @@ export const createClient = () => {
     logLevel
   });
 
-  supabaseInstance = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+  supabaseInstance = createBrowserClient<Database>(supabaseUrl, supabaseAnonKey, {
     global: {
       headers: {
         'ngrok-skip-browser-warning': '1',
